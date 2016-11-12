@@ -23,6 +23,10 @@ func (e *EmbedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		base = http.DefaultTransport
 	}
 
+	if req.Method != http.MethodGet {
+		return base.RoundTrip(req)
+	}
+
 	r, spec, err := stripSpec(req)
 	if err != nil {
 		return nil, err
@@ -60,32 +64,55 @@ func (e *EmbedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		embedded = m
 	}
 
-	for k, v := range links {
-		if k != spec[0] {
-			continue
-		}
-
-		switch v := v.(type) {
-		case map[string]interface{}:
-			data, err := e.embed(req, v)
-			if err != nil {
-				continue
+	current := []map[string]interface{}{data}
+	for i := 0; i < len(spec); i++ {
+		for _, c := range current {
+			links, ok = c["_links"].(map[string]interface{})
+			if !ok {
+				break
 			}
 
-			embedded[k] = data
-		case []interface{}:
-			var arr []map[string]interface{}
-			for _, v := range v {
-				data, err := e.embed(req, v.(map[string]interface{}))
+			link, ok := links[spec[i]]
+			if !ok {
+				break
+			}
+
+			embedded, ok = c["_embedded"].(map[string]interface{})
+			if !ok {
+				m := make(map[string]interface{})
+				c["_embedded"] = m
+				embedded = m
+			}
+
+			switch link := link.(type) {
+			case map[string]interface{}:
+				embed, err := e.get(req, link)
 				if err != nil {
+					log.Fatal(err)
 					continue
 				}
 
-				arr = append(arr, data)
+				embedded[spec[i]] = embed
+
+				current = []map[string]interface{}{embed}
+			case []interface{}:
+				result := []map[string]interface{}{}
+
+				for _, l := range link {
+					embed, err := e.get(req, l.(map[string]interface{}))
+					if err != nil {
+						log.Fatal(err)
+						continue
+					}
+
+					result = append(result, embed)
+				}
+
+				embedded[spec[i]] = result
+				current = result
+			default:
+				continue
 			}
-			embedded[k] = arr
-		default:
-			continue
 		}
 	}
 
@@ -124,7 +151,12 @@ func stripSpec(req *http.Request) (*http.Request, []string, error) {
 	return r, spec, nil
 }
 
-func (e *EmbedTransport) embed(parent *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
+func (e *EmbedTransport) get(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
+	transport := e.RoundTripper
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
 	href, ok := link["href"].(string)
 	if !ok {
 		return nil, errors.New("href not found")
@@ -135,22 +167,13 @@ func (e *EmbedTransport) embed(parent *http.Request, link map[string]interface{}
 		return nil, err
 	}
 
-	_, spec, err := stripSpec(parent)
+	req, err := http.NewRequest(http.MethodGet, base.URL.ResolveReference(uri).String(), nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header = base.Header
 
-	q := uri.Query()
-	q["with"] = spec[1:]
-	uri.RawQuery = q.Encode()
-
-	req, err := http.NewRequest(http.MethodGet, parent.URL.ResolveReference(uri).String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header = parent.Header
-
-	resp, err := e.RoundTrip(req)
+	resp, err := transport.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}

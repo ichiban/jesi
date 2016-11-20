@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	with = "with"
-	href = "href"
-	links = "_links"
+	about    = "about"
+	with     = "with"
+	href     = "href"
+	links    = "_links"
 	embedded = "_embedded"
+	errs     = "errors"
 )
 
 type EmbeddingTransport struct {
@@ -112,16 +114,21 @@ func (e *EmbeddingTransport) embed(req *http.Request, wg *sync.WaitGroup, parent
 
 	switch l := l.(type) {
 	case map[string]interface{}:
-		child, err := e.get(req, l)
+		child, err := e.fetch(req, l)
+		if err, ok := err.(*Error); ok {
+			es[errs] = []*Error{err}
+			return
+		}
 		if err != nil {
 			log.Fatal(err)
-			return
 		}
 		es[spec[0]] = child
 
 		wg.Add(1)
 		go e.embed(req, wg, child, spec[1:])
 	case []interface{}:
+		var errMu sync.Mutex
+
 		children := make([]map[string]interface{}, len(l))
 		var cwg sync.WaitGroup
 		for i, m := range l {
@@ -129,10 +136,19 @@ func (e *EmbeddingTransport) embed(req *http.Request, wg *sync.WaitGroup, parent
 			go func(i int, link map[string]interface{}) {
 				defer cwg.Done()
 
-				child, err := e.get(req, link)
+				child, err := e.fetch(req, link)
+				if err, ok := err.(*Error); ok {
+					errMu.Lock()
+					if _, ok := es[errs]; !ok {
+						var m []*Error
+						es[errs] = m
+					}
+					es[errs] = append(es[errs].([]*Error), err)
+					errMu.Unlock()
+					return
+				}
 				if err != nil {
 					log.Fatal(err)
-					return
 				}
 				children[i] = child
 
@@ -145,7 +161,7 @@ func (e *EmbeddingTransport) embed(req *http.Request, wg *sync.WaitGroup, parent
 	}
 }
 
-func (e *EmbeddingTransport) get(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
+func (e *EmbeddingTransport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
 	transport := e.RoundTripper
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -153,34 +169,91 @@ func (e *EmbeddingTransport) get(base *http.Request, link map[string]interface{}
 
 	h, ok := link[href].(string)
 	if !ok {
-		return nil, errors.New("href not found")
+		return nil, &Error{
+			Title:  "Malformed Link",
+			Detail: fmt.Sprintf("href not found in %v", link),
+		}
 	}
 
 	uri, err := url.Parse(h)
 	if err != nil {
-		return nil, err
+		return nil, &Error{
+			Title:  "Malformed URL",
+			Detail: err.Error(),
+			Links: map[string]interface{}{
+				about: h,
+			},
+		}
 	}
 
 	req, err := http.NewRequest(http.MethodGet, base.URL.ResolveReference(uri).String(), nil)
 	if err != nil {
-		return nil, err
+		return nil, &Error{
+			Title:  "Malformed Subrequest",
+			Detail: err.Error(),
+			Links: map[string]interface{}{
+				about: h,
+			},
+		}
 	}
 	req.Header = base.Header
 
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
-		return nil, err
+		return nil, &Error{
+			Title:  "Round Trip Error",
+			Detail: err.Error(),
+			Links: map[string]interface{}{
+				about: h,
+			},
+		}
+	}
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		return nil, &Error{
+			Status: resp.StatusCode,
+			Title:  "Error Response",
+			Detail: http.StatusText(resp.StatusCode),
+			Links: map[string]interface{}{
+				about: h,
+			},
+		}
 	}
 
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, &Error{
+			Title:  "Read Error",
+			Detail: err.Error(),
+			Links: map[string]interface{}{
+				about: h,
+			},
+		}
 	}
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(b, &data); err != nil {
-		return nil, err
+		return nil, &Error{
+			Title:  "Malformed JSON",
+			Detail: err.Error(),
+			Links: map[string]interface{}{
+				about: h,
+			},
+		}
 	}
 
 	return data, nil
+}
+
+type Error struct {
+	Status int                    `json:"status,omitempty"`
+	Title  string                 `json:"title"`
+	Detail string                 `json:"detail,omitempty"`
+	Links  map[string]interface{} `json:"_links,omitempty"`
+}
+
+var _ error = (*Error)(nil)
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("%s: %s", e.Title, e.Detail)
 }

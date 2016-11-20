@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"encoding/json"
 )
 
 func TestEmbedTransport_RoundTrip(t *testing.T) {
@@ -15,7 +16,7 @@ func TestEmbedTransport_RoundTrip(t *testing.T) {
 		calls     []string
 		body      string
 	}{
-		{ // without 'with' query parameter, it simply returns JSON
+		{ // without 'with' query parameter, it simply returns JSON.
 			url: "/test",
 			resources: map[string]string{
 				"/test": `{}`,
@@ -23,7 +24,7 @@ func TestEmbedTransport_RoundTrip(t *testing.T) {
 			calls: []string{"/test"},
 			body:  `{}`,
 		},
-		{ // with 'with' query parameter, it embeds resources specified by edges
+		{ // with 'with' query parameter, it embeds resources specified by edges.
 			url: "/pen?with=next.next.next",
 			resources: map[string]string{
 				"/pen": `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
@@ -32,6 +33,14 @@ func TestEmbedTransport_RoundTrip(t *testing.T) {
 			},
 			calls: []string{"/pen", "/pineapple", "/apple", "/pen"},
 			body: `{"_embedded":{"next":{"_embedded":{"next":{"_embedded":{"next":{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}},"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}},"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}},"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+		},
+		{ // if the specified edge is not found, it embeds a corresponding error document JSON.
+			url: "/foo?with=bar",
+			resources: map[string]string{
+				"/foo": `{"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
+			},
+			calls: []string{"/foo"},
+			body: `{"_embedded":{"errors":[{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/bar"}}]},"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
 		},
 	}
 
@@ -80,10 +89,15 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	body, ok := t.Resources[req.URL.String()]
 	if !ok {
-		t.T.Errorf("unexpected URL: %s", req.URL.String())
+		resp := &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body: ioutil.NopCloser(strings.NewReader("")),
+		}
+		return resp, nil
 	}
 
 	resp := &http.Response{
+		StatusCode: http.StatusOK,
 		Body: ioutil.NopCloser(strings.NewReader(body)),
 	}
 
@@ -100,6 +114,43 @@ func (t *testTransport) assert(expectations []string) {
 	for i := range t.Actual {
 		if expectations[i] != t.Actual[i] {
 			t.T.Errorf("expected %s, got: %s", expectations[i], t.Actual[i])
+		}
+	}
+}
+
+func TestJsonError_Error(t *testing.T) {
+	testCases := []struct{
+		err *Error
+		json string
+	}{
+		{
+			err: &Error{
+				Title: "something went wrong",
+			},
+			json: `{"title":"something went wrong"}`,
+		},
+		{
+			err: &Error{
+				Status: http.StatusNotFound,
+				Title: "Error Response",
+				Detail: http.StatusText(http.StatusNotFound),
+				Links: map[string]interface{}{
+					"about": map[string]interface{}{
+						"href": "/foo",
+					},
+				},
+			},
+			json: `{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":{"href":"/foo"}}}`,
+		},
+	}
+
+	for _, tc := range testCases {
+		b, err := json.Marshal(tc.err)
+		if err != nil {
+			t.Error(err)
+		}
+		if tc.json != string(b) {
+			t.Errorf("expected: %s, got: %s", tc.json, string(b))
 		}
 	}
 }

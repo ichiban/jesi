@@ -1,4 +1,4 @@
-package main
+package embed
 
 import (
 	"bytes"
@@ -21,14 +21,14 @@ const (
 	errs     = "errors"
 )
 
-type EmbeddingTransport struct {
+type Transport struct {
 	http.RoundTripper
 }
 
-func (e *EmbeddingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	log.Printf("uri: %s", req.URL.String())
+var _ http.RoundTripper = (*Transport)(nil)
 
-	base := e.RoundTripper
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.RoundTripper
 	if base == nil {
 		base = http.DefaultTransport
 	}
@@ -37,10 +37,7 @@ func (e *EmbeddingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		return base.RoundTrip(req)
 	}
 
-	spec, err := stripSpec(req)
-	if err != nil {
-		return nil, err
-	}
+	spec := stripSpec(req)
 
 	resp, err := base.RoundTrip(req)
 	if err != nil {
@@ -59,12 +56,12 @@ func (e *EmbeddingTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(b, &data); err != nil {
-		log.Fatalf("json.Unmarshal() failed: %v", err)
+		return resp, err
 	}
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go e.embed(req, &wg, data, spec)
+	go t.embed(req, &wg, data, spec)
 	wg.Wait()
 
 	b, err = json.Marshal(data)
@@ -77,7 +74,7 @@ func (e *EmbeddingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return resp, nil
 }
 
-func stripSpec(req *http.Request) ([]string, error) {
+func stripSpec(req *http.Request) []string {
 	w := req.URL.Query().Get(with)
 	spec := strings.Split(w, ".")
 
@@ -85,10 +82,10 @@ func stripSpec(req *http.Request) ([]string, error) {
 	q.Del(with)
 	req.URL.RawQuery = q.Encode()
 
-	return spec, nil
+	return spec
 }
 
-func (e *EmbeddingTransport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec []string) {
+func (e *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec []string) {
 	defer wg.Done()
 
 	if len(spec) == 0 {
@@ -161,7 +158,7 @@ func (e *EmbeddingTransport) embed(req *http.Request, wg *sync.WaitGroup, parent
 	}
 }
 
-func (e *EmbeddingTransport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
+func (e *Transport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
 	transport := e.RoundTripper
 	if transport == nil {
 		transport = http.DefaultTransport
@@ -243,17 +240,4 @@ func (e *EmbeddingTransport) fetch(base *http.Request, link map[string]interface
 	}
 
 	return data, nil
-}
-
-type Error struct {
-	Status int                    `json:"status,omitempty"`
-	Title  string                 `json:"title"`
-	Detail string                 `json:"detail,omitempty"`
-	Links  map[string]interface{} `json:"_links,omitempty"`
-}
-
-var _ error = (*Error)(nil)
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Title, e.Detail)
 }

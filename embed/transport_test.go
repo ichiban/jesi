@@ -1,4 +1,4 @@
-package main
+package embed
 
 import (
 	"bytes"
@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"encoding/json"
 )
 
-func TestEmbedTransport_RoundTrip(t *testing.T) {
+func TestTransport_RoundTrip(t *testing.T) {
 	testCases := []struct {
 		url       string
 		resources map[string]string
@@ -27,12 +26,12 @@ func TestEmbedTransport_RoundTrip(t *testing.T) {
 		{ // with 'with' query parameter, it embeds resources specified by edges.
 			url: "/pen?with=next.next.next",
 			resources: map[string]string{
-				"/pen": `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+				"/pen":       `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
 				"/pineapple": `{"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}`,
-				"/apple": `{"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}`,
+				"/apple":     `{"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}`,
 			},
 			calls: []string{"/pen", "/pineapple", "/apple", "/pen"},
-			body: `{"_embedded":{"next":{"_embedded":{"next":{"_embedded":{"next":{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}},"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}},"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}},"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+			body:  `{"_embedded":{"next":{"_embedded":{"next":{"_embedded":{"next":{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}},"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}},"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}},"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
 		},
 		{ // if the specified edge is not found, it embeds a corresponding error document JSON.
 			url: "/foo?with=bar",
@@ -40,7 +39,7 @@ func TestEmbedTransport_RoundTrip(t *testing.T) {
 				"/foo": `{"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
 			},
 			calls: []string{"/foo"},
-			body: `{"_embedded":{"errors":[{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/bar"}}]},"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
+			body:  `{"_embedded":{"errors":[{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/bar"}}]},"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
 		},
 	}
 
@@ -54,7 +53,7 @@ func TestEmbedTransport_RoundTrip(t *testing.T) {
 			T:         t,
 			Resources: tc.resources,
 		}
-		e := EmbeddingTransport{tt}
+		e := Transport{tt}
 
 		r, err := e.RoundTrip(req)
 		if err != nil {
@@ -91,14 +90,14 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !ok {
 		resp := &http.Response{
 			StatusCode: http.StatusNotFound,
-			Body: ioutil.NopCloser(strings.NewReader("")),
+			Body:       ioutil.NopCloser(strings.NewReader("")),
 		}
 		return resp, nil
 	}
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
-		Body: ioutil.NopCloser(strings.NewReader(body)),
+		Body:       ioutil.NopCloser(strings.NewReader(body)),
 	}
 
 	t.Actual = append(t.Actual, req.URL.String())
@@ -114,43 +113,6 @@ func (t *testTransport) assert(expectations []string) {
 	for i := range t.Actual {
 		if expectations[i] != t.Actual[i] {
 			t.T.Errorf("expected %s, got: %s", expectations[i], t.Actual[i])
-		}
-	}
-}
-
-func TestJsonError_Error(t *testing.T) {
-	testCases := []struct{
-		err *Error
-		json string
-	}{
-		{
-			err: &Error{
-				Title: "something went wrong",
-			},
-			json: `{"title":"something went wrong"}`,
-		},
-		{
-			err: &Error{
-				Status: http.StatusNotFound,
-				Title: "Error Response",
-				Detail: http.StatusText(http.StatusNotFound),
-				Links: map[string]interface{}{
-					"about": map[string]interface{}{
-						"href": "/foo",
-					},
-				},
-			},
-			json: `{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":{"href":"/foo"}}}`,
-		},
-	}
-
-	for _, tc := range testCases {
-		b, err := json.Marshal(tc.err)
-		if err != nil {
-			t.Error(err)
-		}
-		if tc.json != string(b) {
-			t.Errorf("expected: %s, got: %s", tc.json, string(b))
 		}
 	}
 }

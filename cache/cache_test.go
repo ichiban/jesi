@@ -250,7 +250,7 @@ func TestCache_Set(t *testing.T) {
 			if len(tc.resp.Header) != len(resp.Header) {
 				t.Errorf("expected %d, got %d", len(tc.resp.Header), len(resp.Header))
 			}
-			for i := 0; i < len(tc.resp.Header); i++ {
+			for i := 0; i < len(tc.resp.Header[k]); i++ {
 				if tc.resp.Header[k][i] != resp.Header[k][i] {
 					t.Errorf("for header %s, expected %#v, got %#v", k, tc.resp.Header[k][i], resp.Header[k][i])
 				}

@@ -38,7 +38,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 
-	if cacheable(req, resp) {
+	if Cacheable(req, resp) {
 		t.Set(req, resp)
 	}
 
@@ -50,8 +50,8 @@ func valid(resp *http.Response) bool {
 	return resp != nil
 }
 
-// check if the req/resp pair is cacheable based on https://tools.ietf.org/html/rfc7234#section-3
-func cacheable(req *http.Request, resp *http.Response) bool {
+// Cacheable checks if the req/resp pair is cacheable based on https://tools.ietf.org/html/rfc7234#section-3
+func Cacheable(req *http.Request, resp *http.Response) bool {
 	if req.Method != http.MethodGet {
 		return false
 	}
@@ -78,7 +78,7 @@ func cacheable(req *http.Request, resp *http.Response) bool {
 		return true
 	}
 
-	if contains(resp.Header, "Cache-Control", regexp.MustCompile(`\A(?:maxage=\d+|s-maxage=\d+|public)\z`)) {
+	if contains(resp.Header, "Cache-Control", regexp.MustCompile(`\A(?:max-age=\d+|s-maxage=\d+|public)\z`)) {
 		return true
 	}
 

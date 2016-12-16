@@ -1,13 +1,14 @@
 package cache
 
 import (
+	"bytes"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"sync"
-	"io/ioutil"
-	"bytes"
+	"time"
 )
 
 type Cache struct {
@@ -15,7 +16,7 @@ type Cache struct {
 	Primary map[PrimaryKey]*PrimaryEntry
 }
 
-func (c *Cache) Set(req *http.Request, resp *http.Response) error {
+func (c *Cache) Set(req *http.Request, resp *CachedResponse) error {
 	c.init()
 
 	c.Lock()
@@ -30,17 +31,12 @@ func (c *Cache) Set(req *http.Request, resp *http.Response) error {
 
 	sKey := NewSecondaryKey(pe, req)
 
-	se, err := NewSecondaryEntry(resp)
-	if err != nil {
-		return err
-	}
-
-	pe.Secondary[sKey] = se
+	pe.Secondary[sKey] = resp
 
 	return nil
 }
 
-func (c *Cache) Get(req *http.Request) *http.Response {
+func (c *Cache) Get(req *http.Request) *CachedResponse {
 	c.init()
 
 	c.RLock()
@@ -53,12 +49,12 @@ func (c *Cache) Get(req *http.Request) *http.Response {
 	}
 
 	sKey := NewSecondaryKey(pe, req)
-	se := pe.Secondary[sKey]
-	if se == nil {
+	resp := pe.Secondary[sKey]
+	if resp == nil {
 		return nil
 	}
 
-	return se.Response()
+	return resp
 }
 
 func (c *Cache) init() {
@@ -80,21 +76,23 @@ func (c *Cache) Clear() {
 type PrimaryKey struct {
 	Host string
 	Path string
+	Query string
 }
 
 func NewPrimaryKey(req *http.Request) PrimaryKey {
 	return PrimaryKey{
 		Host: req.URL.Host,
 		Path: req.URL.Path,
+		Query: req.URL.Query().Encode(),
 	}
 }
 
 type PrimaryEntry struct {
 	Fields    []string
-	Secondary map[SecondaryKey]*SecondaryEntry
+	Secondary map[SecondaryKey]*CachedResponse
 }
 
-func NewPrimaryEntry(resp *http.Response) *PrimaryEntry {
+func NewPrimaryEntry(resp *CachedResponse) *PrimaryEntry {
 	var fields []string
 
 	for _, vary := range resp.Header["Vary"] {
@@ -108,7 +106,7 @@ func NewPrimaryEntry(resp *http.Response) *PrimaryEntry {
 
 	return &PrimaryEntry{
 		Fields:    fields,
-		Secondary: make(map[SecondaryKey]*SecondaryEntry),
+		Secondary: make(map[SecondaryKey]*CachedResponse),
 	}
 }
 
@@ -142,12 +140,15 @@ func NewSecondaryKey(pe *PrimaryEntry, req *http.Request) SecondaryKey {
 	return SecondaryKey(vals.Encode())
 }
 
-type SecondaryEntry struct {
-	Header http.Header
-	Body []byte
+type CachedResponse struct {
+	sync.RWMutex
+	Header       http.Header
+	Body         []byte
+	RequestTime  time.Time
+	ResponseTime time.Time
 }
 
-func NewSecondaryEntry(resp *http.Response) (*SecondaryEntry, error) {
+func NewCachedResponse(resp *http.Response, reqTime, respTime time.Time) (*CachedResponse, error) {
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -155,16 +156,23 @@ func NewSecondaryEntry(resp *http.Response) (*SecondaryEntry, error) {
 
 	resp.Body = ioutil.NopCloser(bytes.NewReader(body))
 
-	return &SecondaryEntry{
-		Header: resp.Header,
-		Body: body,
+	return &CachedResponse{
+		Header:       resp.Header,
+		Body:         body,
+		RequestTime:  reqTime,
+		ResponseTime: respTime,
 	}, nil
 }
 
-func (e *SecondaryEntry) Response() *http.Response {
+func (e *CachedResponse) Response() *http.Response {
+	h := http.Header{}
+	for k, v := range e.Header {
+		h[k] = v
+	}
+
 	return &http.Response{
 		StatusCode: http.StatusOK,
-		Header: e.Header,
-		Body: ioutil.NopCloser(bytes.NewReader(e.Body)),
+		Header:     e.Header,
+		Body:       ioutil.NopCloser(bytes.NewReader(e.Body)),
 	}
 }

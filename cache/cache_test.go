@@ -1,11 +1,10 @@
 package cache
 
 import (
-	"net/http"
-	"testing"
-	"bytes"
 	"io/ioutil"
+	"net/http"
 	"net/url"
+	"testing"
 )
 
 func TestCache_Get(t *testing.T) {
@@ -15,16 +14,16 @@ func TestCache_Get(t *testing.T) {
 	}
 
 	testCases := []struct {
-		cache  *Cache
-		req *http.Request
+		cache *Cache
+		req   *http.Request
 
-		resp *http.Response
+		resp *CachedResponse
 	}{
 		{ // when it's not cached
-			cache:  &Cache{},
+			cache: &Cache{},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 			},
 
 			resp: nil,
@@ -33,7 +32,7 @@ func TestCache_Get(t *testing.T) {
 			cache: &Cache{
 				Primary: map[PrimaryKey]*PrimaryEntry{
 					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
-						Secondary: map[SecondaryKey]*SecondaryEntry{
+						Secondary: map[SecondaryKey]*CachedResponse{
 							"": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -43,13 +42,12 @@ func TestCache_Get(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 			},
 
-			resp: &http.Response{
-				StatusCode: http.StatusOK,
+			resp: &CachedResponse{
 				Header: http.Header{},
-				Body: ioutil.NopCloser(bytes.NewReader([]byte(`{"foo":"bar"}`))),
+				Body:   []byte(`{"foo":"bar"}`),
 			},
 		},
 		{ // when it's cached and also the secondary key matches
@@ -57,7 +55,7 @@ func TestCache_Get(t *testing.T) {
 				Primary: map[PrimaryKey]*PrimaryEntry{
 					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						Secondary: map[SecondaryKey]*SecondaryEntry{
+						Secondary: map[SecondaryKey]*CachedResponse{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -67,17 +65,16 @@ func TestCache_Get(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 				Header: http.Header{
 					"Accept":          []string{"application/json"},
 					"Accept-Language": []string{"ja-JP"},
 				},
 			},
 
-			resp: &http.Response{
-				StatusCode: http.StatusOK,
+			resp: &CachedResponse{
 				Header: http.Header{},
-				Body: ioutil.NopCloser(bytes.NewReader([]byte(`{"foo":"bar"}`))),
+				Body:   []byte(`{"foo":"bar"}`),
 			},
 		},
 		{ // when it's cached but the secondary key doesn't match
@@ -85,7 +82,7 @@ func TestCache_Get(t *testing.T) {
 				Primary: map[PrimaryKey]*PrimaryEntry{
 					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						Secondary: map[SecondaryKey]*SecondaryEntry{
+						Secondary: map[SecondaryKey]*CachedResponse{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -95,7 +92,7 @@ func TestCache_Get(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 				Header: http.Header{
 					"Accept":          []string{"application/json"},
 					"Accept-Language": []string{"en-US"},
@@ -123,10 +120,6 @@ func TestCache_Get(t *testing.T) {
 			continue
 		}
 
-		if tc.resp.StatusCode != resp.StatusCode {
-			t.Errorf("expected %d, got %d", tc.resp.StatusCode, resp.StatusCode)
-		}
-
 		for k := range tc.resp.Header {
 			if len(tc.resp.Header) != len(resp.Header) {
 				t.Errorf("expected %d, got %d", len(tc.resp.Header), len(resp.Header))
@@ -138,18 +131,8 @@ func TestCache_Get(t *testing.T) {
 			}
 		}
 
-		expected, err := ioutil.ReadAll(tc.resp.Body)
-		if err != nil {
-			t.Error(err)
-		}
-
-		actual, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			t.Error(err)
-		}
-
-		if string(expected) != string(actual) {
-			t.Errorf("expected %#v, got %#v", expected, actual)
+		if string(tc.resp.Body) != string(resp.Body) {
+			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(resp.Body))
 		}
 	}
 }
@@ -161,22 +144,21 @@ func TestCache_Set(t *testing.T) {
 	}
 
 	testCases := []struct {
-		cache     *Cache
-		req *http.Request
-		resp      *http.Response
+		cache *Cache
+		req   *http.Request
+		resp  *CachedResponse
 
 		primary   PrimaryKey
 		secondary SecondaryKey
 	}{
 		{ // when there's no entry for the request (insert)
-			cache:  &Cache{},
+			cache: &Cache{},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 			},
-			resp:   &http.Response{
-				StatusCode: http.StatusOK,
-				Body: ioutil.NopCloser(bytes.NewReader([]byte{})),
+			resp: &CachedResponse{
+				Body: []byte{},
 			},
 
 			primary:   PrimaryKey{Host: "www.example.com", Path: "/test"},
@@ -186,7 +168,7 @@ func TestCache_Set(t *testing.T) {
 			cache: &Cache{
 				Primary: map[PrimaryKey]*PrimaryEntry{
 					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
-						Secondary: map[SecondaryKey]*SecondaryEntry{
+						Secondary: map[SecondaryKey]*CachedResponse{
 							"": {},
 						},
 					},
@@ -194,11 +176,10 @@ func TestCache_Set(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 			},
-			resp:   &http.Response{
-				StatusCode: http.StatusOK,
-				Body: ioutil.NopCloser(bytes.NewReader([]byte{})),
+			resp: &CachedResponse{
+				Body: []byte{},
 			},
 
 			primary:   PrimaryKey{Host: "www.example.com", Path: "/test"},
@@ -208,15 +189,14 @@ func TestCache_Set(t *testing.T) {
 			cache: &Cache{},
 			req: &http.Request{
 				Method: http.MethodGet,
-				URL: url,
+				URL:    url,
 				Header: http.Header{
 					"Accept":          []string{"application/json"},
 					"Accept-Language": []string{"ja-JP"},
 				},
 			},
-			resp: &http.Response{
-				StatusCode: http.StatusOK,
-				Body: ioutil.NopCloser(bytes.NewReader([]byte{})),
+			resp: &CachedResponse{
+				Body: []byte{},
 				Header: http.Header{
 					"Vary": []string{"Accept", "Accept-Language"},
 				},
@@ -242,8 +222,8 @@ func TestCache_Set(t *testing.T) {
 
 		resp := result.Response()
 
-		if tc.resp.StatusCode != resp.StatusCode {
-			t.Errorf("expected %d, got %d", tc.resp.StatusCode, resp.StatusCode)
+		if http.StatusOK != resp.StatusCode {
+			t.Errorf("expected %d, got %d", http.StatusOK, resp.StatusCode)
 		}
 
 		for k := range tc.resp.Header {
@@ -257,18 +237,13 @@ func TestCache_Set(t *testing.T) {
 			}
 		}
 
-		expected, err := ioutil.ReadAll(tc.resp.Body)
-		if err != nil {
-			t.Error(err)
-		}
-
 		actual, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			t.Error(err)
 		}
 
-		if string(expected) != string(actual) {
-			t.Errorf("expected %#v, got %#v", expected, actual)
+		if string(tc.resp.Body) != string(actual) {
+			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(actual))
 		}
 	}
 }

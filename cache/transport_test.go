@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTransport_RoundTrip(t *testing.T) {
@@ -36,6 +37,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
+				Header: http.Header{},
 				URL:    url,
 			},
 			resp: &http.Response{
@@ -63,6 +65,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
+				Header: http.Header{},
 				URL:    url,
 			},
 			resp: &http.Response{
@@ -80,9 +83,14 @@ func TestTransport_RoundTrip(t *testing.T) {
 				Cache: Cache{
 					Primary: map[PrimaryKey]*PrimaryEntry{
 						PrimaryKey{Host: "www.example.com", Path: "/test"}: {
-							Secondary: map[SecondaryKey]*SecondaryEntry{
+							Secondary: map[SecondaryKey]*CachedResponse{
 								"": {
-									Body: []byte(`{"foo":"bar"}`),
+									Header: http.Header{
+										"Cache-Control": []string{"s-maxage=600"},
+									},
+									Body:         []byte(`{"foo":"bar"}`),
+									RequestTime:  time.Now(),
+									ResponseTime: time.Now(),
 								},
 							},
 						},
@@ -91,6 +99,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
+				Header: http.Header{},
 				URL:    url,
 			},
 			resp: &http.Response{
@@ -211,10 +220,10 @@ func TestCacheable(t *testing.T) {
 			},
 			resp: &http.Response{
 				StatusCode: http.StatusOK,
-				Header:     http.Header{
+				Header: http.Header{
 					"Cache-Control": []string{"no-store"},
 				},
-				Body:       ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
+				Body: ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
 			},
 			result: false,
 		},
@@ -226,10 +235,10 @@ func TestCacheable(t *testing.T) {
 			},
 			resp: &http.Response{
 				StatusCode: http.StatusOK,
-				Header:     http.Header{
+				Header: http.Header{
 					"Cache-Control": []string{"private"},
 				},
-				Body:       ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
+				Body: ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
 			},
 			result: false,
 		},
@@ -258,10 +267,10 @@ func TestCacheable(t *testing.T) {
 			},
 			resp: &http.Response{
 				StatusCode: http.StatusOK,
-				Header:     http.Header{
+				Header: http.Header{
 					"Cache-Control": []string{"public"},
 				},
-				Body:       ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
+				Body: ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
 			},
 			result: true,
 		},
@@ -335,6 +344,197 @@ func TestCacheable(t *testing.T) {
 	}
 }
 
+func TestState(t *testing.T) {
+	url, err := url.Parse("http://www.example.com/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+
+	testCases := []struct {
+		req    *http.Request
+		cached *CachedResponse
+
+		state CacheState
+		delta time.Duration
+	}{
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: nil,
+
+			state: Miss,
+			delta: time.Duration(0),
+		},
+		{
+			req: &http.Request{
+				URL: url,
+				Header: http.Header{
+					"Pragma": []string{"no-cache"},
+				},
+			},
+			cached: &CachedResponse{
+				Header:       http.Header{},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Revalidate,
+			delta: time.Duration(0),
+		},
+		{
+			req: &http.Request{
+				URL: url,
+				Header: http.Header{
+					"Cache-Control": []string{"no-cache"},
+				},
+			},
+			cached: &CachedResponse{
+				Header:       http.Header{},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Revalidate,
+			delta: time.Duration(0),
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Cache-Control": []string{"no-cache"},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Revalidate,
+			delta: time.Duration(0),
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Cache-Control": []string{"s-maxage=3"},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Fresh,
+			delta: -1 * time.Second,
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Cache-Control": []string{"max-age=3"},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Fresh,
+			delta: -1 * time.Second,
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Expires": []string{now.Add(3 * time.Second).Format(time.RFC1123)},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Fresh,
+			delta: -1 * time.Second,
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Cache-Control": []string{"max-age=1, must-revalidate"},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Revalidate,
+			delta: time.Duration(0),
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Cache-Control": []string{"max-age=2"},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Stale,
+			delta: time.Duration(0),
+		},
+		{
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header:       http.Header{},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Revalidate,
+			delta: time.Duration(0),
+		},
+	}
+
+	for i, tc := range testCases {
+		s, d := State(tc.req, tc.cached)
+
+		if tc.state != s {
+			t.Errorf("(%d) expected %d, got %d", i, tc.state, s)
+		}
+
+		if tc.delta-d > 1*time.Millisecond {
+			t.Errorf("(%d) expected %d, got %d", i, tc.delta, d)
+		}
+	}
+}
+
 type testTransport struct {
 	Resources map[string]*http.Response
 }
@@ -350,6 +550,7 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if !ok {
 		resp := &http.Response{
 			StatusCode: http.StatusNotFound,
+			Header:     http.Header{},
 			Body:       ioutil.NopCloser(strings.NewReader("")),
 		}
 		return resp, nil

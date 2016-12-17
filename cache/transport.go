@@ -64,7 +64,6 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	cached := t.Get(req)
-
 	if cached != nil {
 		cached.RLock()
 		defer cached.RUnlock()

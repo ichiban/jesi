@@ -245,5 +245,17 @@ func TestCache_Set(t *testing.T) {
 		if string(tc.resp.Body) != string(actual) {
 			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(actual))
 		}
+
+		if tc.cache.History.Len() != 1 {
+			t.Errorf("expected 1, got %d", tc.cache.History.Len())
+		}
+
+		k := tc.cache.History.Front().Value.(key)
+		if tc.primary != k.primary  {
+			t.Errorf("expected %v, got %v", tc.primary, k.primary)
+		}
+		if tc.secondary != k.secondary  {
+			t.Errorf("expected %v, got %v", tc.primary, k.primary)
+		}
 	}
 }

@@ -17,7 +17,9 @@ func main() {
 		log.Fatal(err)
 	}
 	handler := httputil.NewSingleHostReverseProxy(uri)
-	handler.Transport = &embed.Transport{&cache.Transport{}}
+	ct := &cache.Transport{}
+	ct.Cache.MaxBytes = 3000000
+	handler.Transport = &embed.Transport{ct}
 	server := http.Server{
 		Addr:    addr,
 		Handler: handler,

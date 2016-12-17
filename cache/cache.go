@@ -2,9 +2,12 @@ package cache
 
 import (
 	"bytes"
+	"container/list"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -13,10 +16,12 @@ import (
 
 type Cache struct {
 	sync.RWMutex
-	Primary map[PrimaryKey]*PrimaryEntry
+	Primary  map[PrimaryKey]*PrimaryEntry
+	History  *list.List
+	MaxBytes uint64
 }
 
-func (c *Cache) Set(req *http.Request, resp *CachedResponse) error {
+func (c *Cache) Set(req *http.Request, cached *CachedResponse) error {
 	c.init()
 
 	c.Lock()
@@ -25,15 +30,47 @@ func (c *Cache) Set(req *http.Request, resp *CachedResponse) error {
 	pKey := NewPrimaryKey(req)
 	pe, ok := c.Primary[pKey]
 	if !ok {
-		pe = NewPrimaryEntry(resp)
+		pe = NewPrimaryEntry(cached)
 		c.Primary[pKey] = pe
 	}
 
 	sKey := NewSecondaryKey(pe, req)
+	if old, ok := pe.Secondary[sKey]; ok && old.Element != nil {
+		c.History.Remove(old.Element)
+	}
+	pe.Secondary[sKey] = cached
+	cached.Element = c.History.PushFront(key{primary: pKey, secondary: sKey})
 
-	pe.Secondary[sKey] = resp
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	log.Printf("inuse: %d", stats.HeapInuse)
+	if c.MaxBytes != 0 && stats.HeapInuse > c.MaxBytes {
+		c.removeLRU()
+	}
 
 	return nil
+}
+
+func (c *Cache) removeLRU() {
+	e := c.History.Back()
+	c.History.Remove(e)
+	k := e.Value.(key)
+
+	log.Printf("evict: %#v", k)
+
+	pe, ok := c.Primary[k.primary]
+	if !ok {
+		return
+	}
+
+	_, ok = pe.Secondary[k.secondary]
+	if ok {
+		delete(pe.Secondary, k.secondary)
+	}
+
+	if len(pe.Secondary) == 0 {
+		delete(c.Primary, k.primary)
+	}
 }
 
 func (c *Cache) Get(req *http.Request) *CachedResponse {
@@ -49,12 +86,16 @@ func (c *Cache) Get(req *http.Request) *CachedResponse {
 	}
 
 	sKey := NewSecondaryKey(pe, req)
-	resp := pe.Secondary[sKey]
-	if resp == nil {
+	cached, ok := pe.Secondary[sKey]
+	if !ok {
 		return nil
 	}
 
-	return resp
+	if cached.Element != nil {
+		c.History.MoveToFront(cached.Element)
+	}
+
+	return cached
 }
 
 func (c *Cache) init() {
@@ -64,6 +105,10 @@ func (c *Cache) init() {
 	if c.Primary == nil {
 		c.Primary = make(map[PrimaryKey]*PrimaryEntry)
 	}
+
+	if c.History == nil {
+		c.History = list.New()
+	}
 }
 
 func (c *Cache) Clear() {
@@ -71,18 +116,19 @@ func (c *Cache) Clear() {
 	defer c.Unlock()
 
 	c.Primary = make(map[PrimaryKey]*PrimaryEntry)
+	c.History.Init()
 }
 
 type PrimaryKey struct {
-	Host string
-	Path string
+	Host  string
+	Path  string
 	Query string
 }
 
 func NewPrimaryKey(req *http.Request) PrimaryKey {
 	return PrimaryKey{
-		Host: req.URL.Host,
-		Path: req.URL.Path,
+		Host:  req.URL.Host,
+		Path:  req.URL.Path,
 		Query: req.URL.Query().Encode(),
 	}
 }
@@ -146,6 +192,7 @@ type CachedResponse struct {
 	Body         []byte
 	RequestTime  time.Time
 	ResponseTime time.Time
+	Element      *list.Element
 }
 
 func NewCachedResponse(resp *http.Response, reqTime, respTime time.Time) (*CachedResponse, error) {
@@ -175,4 +222,9 @@ func (e *CachedResponse) Response() *http.Response {
 		Header:     e.Header,
 		Body:       ioutil.NopCloser(bytes.NewReader(e.Body)),
 	}
+}
+
+type key struct {
+	primary   PrimaryKey
+	secondary SecondaryKey
 }

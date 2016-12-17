@@ -205,6 +205,7 @@ func (e *Transport) fetch(base *http.Request, link map[string]interface{}) (map[
 			},
 		}
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, &Error{

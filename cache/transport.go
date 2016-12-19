@@ -66,7 +66,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		log.Printf("fresh: %s", req.URL)
 		return cached.Response(), nil
 	case Stale:
-		if exceedsMaxStale(cached, delta) {
+		if maxStale(cached) < delta {
 			break
 		}
 
@@ -324,27 +324,18 @@ func parseHTTPTime(s string) (time.Time, error) {
 	return time.Now(), fmt.Errorf("invalid HTTP time: %s", s)
 }
 
-func exceedsMaxStale(cached *CachedResponse, delta time.Duration) bool {
-	maxStale, ok := maxStale(cached)
-	if !ok {
-		return false
-	}
-
-	return maxStale <= delta
-}
-
-func maxStale(cached *CachedResponse) (time.Duration, bool) {
+func maxStale(cached *CachedResponse) time.Duration {
 	matches := matches(cached.Header, cacheControlField, maxStalePattern)
 	if matches == nil {
-		return time.Duration(0), false
+		return time.Duration(0)
 	}
 
 	s, err := strconv.Atoi(matches[1])
 	if err != nil {
-		return time.Duration(s) * time.Second, false
+		return time.Duration(0)
 	}
 
-	return time.Duration(s) * time.Second, true
+	return time.Duration(s) * time.Second
 }
 
 func currentAge(cached *CachedResponse) time.Duration {

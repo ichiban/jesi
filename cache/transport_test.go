@@ -81,9 +81,9 @@ func TestTransport_RoundTrip(t *testing.T) {
 			transport: &Transport{
 				RoundTripper: &testTransport{},
 				Cache: Cache{
-					Primary: map[PrimaryKey]*PrimaryEntry{
-						PrimaryKey{Host: "www.example.com", Path: "/test"}: {
-							Secondary: map[SecondaryKey]*CachedResponse{
+					URLVars: map[URLKey]*Variations{
+						URLKey{Host: "www.example.com", Path: "/test"}: {
+							VarResponse: map[VarKey]*CachedResponse{
 								"": {
 									Header: http.Header{
 										"Cache-Control": []string{"s-maxage=600"},
@@ -356,7 +356,7 @@ func TestState(t *testing.T) {
 		req    *http.Request
 		cached *CachedResponse
 
-		state CacheState
+		state CachedState
 		delta time.Duration
 	}{
 		{

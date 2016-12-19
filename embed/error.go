@@ -2,6 +2,7 @@ package embed
 
 import "fmt"
 
+// Error represents an embedding error.
 type Error struct {
 	Status int                    `json:"status,omitempty"`
 	Title  string                 `json:"title"`

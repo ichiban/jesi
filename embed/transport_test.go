@@ -97,6 +97,7 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
+		Header:     http.Header{},
 		Body:       ioutil.NopCloser(strings.NewReader(body)),
 	}
 

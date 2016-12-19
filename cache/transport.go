@@ -38,6 +38,7 @@ var (
 	maxStalePattern = regexp.MustCompile(`\Amax-stale=(\d+)\z`)
 )
 
+// Transport is a caching round tripper.
 type Transport struct {
 	http.RoundTripper
 	Cache
@@ -45,22 +46,12 @@ type Transport struct {
 
 var _ http.RoundTripper = (*Transport)(nil)
 
+// RoundTrip returns a cached response if found. Otherwise, retrieve one from the underlying transport.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if t.RoundTripper == nil {
-		t.RoundTripper = http.DefaultTransport
-	}
+	t.init()
 
-	if req.Method != http.MethodGet && req.Method != http.MethodHead {
-		resp, err := t.RoundTripper.RoundTrip(req)
-		if err != nil {
-			return resp, err
-		}
-
-		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest {
-			t.Clear()
-		}
-
-		return resp, nil
+	if !idempotent(req) {
+		return t.roundTripClear(req)
 	}
 
 	cached := t.Get(req)
@@ -75,33 +66,15 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		log.Printf("fresh: %s", req.URL)
 		return cached.Response(), nil
 	case Stale:
-		if maxStale, ok := maxStale(cached); ok && maxStale > delta {
-			log.Printf("stale: %s", req.URL)
-			resp := cached.Response()
-			resp.Header.Set(warningField, `110 - "Response is Stale"`)
-			return resp, nil
+		if exceedsMaxStale(cached, delta) {
+			break
 		}
+
+		log.Printf("stale: %s", req.URL)
+		return staleResponse(cached), nil
 	case Revalidate:
 		log.Printf("revalidate: %s", req.URL)
-
-		orig := req
-
-		req = &http.Request{
-			Method: req.Method,
-			URL:    req.URL,
-			Header: http.Header{},
-		}
-
-		for k, v := range orig.Header {
-			req.Header[k] = v
-		}
-
-		if etag := cached.Header.Get(etagField); etag != "" {
-			req.Header.Set(ifNoneMatchField, etag)
-		}
-		if time := cached.Header.Get(lastModifiedField); time != "" {
-			req.Header.Set(ifModifiedSinceField, time)
-		}
+		req = revalidateRequest(req, cached)
 	}
 
 	log.Printf("from backend: %s", req.URL)
@@ -112,62 +85,135 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		if state == Stale {
 			log.Printf("stale: %s", req.URL)
-			resp := cached.Response()
-			resp.Header.Set(warningField, `110 - "Response is Stale"`)
-			return resp, nil
+			return staleResponse(cached), nil
 		}
 
 		return resp, err
 	}
 
-	if state == Revalidate && resp.StatusCode == http.StatusNotModified {
+	if revalidated(state, resp) {
 		log.Printf("validated: %s", req.URL)
-
-		h := resp.Header
-		resp = cached.Response()
-
-		var warnings []string
-		for _, warning := range values(resp.Header, warningField) {
-			if strings.HasPrefix(warning, "2") {
-				warnings = append(warnings, warning)
-			}
-		}
-		resp.Header[warningField] = warnings
-
-		for k, v := range h {
-			if k == warningField {
-				continue
-			}
-			resp.Header[k] = v
-		}
+		resp = revalidatedResponse(resp, cached)
 	}
 
-	if Cacheable(req, resp) {
-		cached, err := NewCachedResponse(resp, reqTime, respTime)
-		if err != nil {
-			log.Fatal(err)
-		}
-		t.Set(req, cached)
+	t.cacheIfPossible(req, resp, reqTime, respTime)
+
+	return resp, nil
+}
+
+func (t *Transport) init() {
+	if t.RoundTripper != nil {
+		return
 	}
 
-	if _, ok := resp.Header[warningField]; !ok {
-		resp.Header.Set(warningField, `214 - "Transformation Applied"`)
+	t.RoundTripper = http.DefaultTransport
+}
+
+func (t *Transport) roundTripClear(req *http.Request) (*http.Response, error) {
+	resp, err := t.RoundTripper.RoundTrip(req)
+	if err != nil {
+		return resp, err
+	}
+
+	if successful(resp) {
+		t.Clear()
 	}
 
 	return resp, nil
 }
 
-type CacheState int
+func idempotent(req *http.Request) bool {
+	return req.Method == http.MethodGet || req.Method == http.MethodHead
+}
+
+func successful(resp *http.Response) bool {
+	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
+}
+
+func revalidateRequest(orig *http.Request, cached *CachedResponse) *http.Request {
+	req := &http.Request{
+		Method: orig.Method,
+		URL:    orig.URL,
+		Header: http.Header{},
+	}
+
+	for k, v := range orig.Header {
+		req.Header[k] = v
+	}
+
+	if etag := cached.Header.Get(etagField); etag != "" {
+		req.Header.Set(ifNoneMatchField, etag)
+	}
+
+	if time := cached.Header.Get(lastModifiedField); time != "" {
+		req.Header.Set(ifModifiedSinceField, time)
+	}
+
+	return req
+}
+
+func staleResponse(cached *CachedResponse) *http.Response {
+	resp := cached.Response()
+	resp.Header.Set(warningField, `110 - "Response is Stale"`)
+	return resp
+}
+
+func revalidatedResponse(resp *http.Response, cached *CachedResponse) *http.Response {
+	result := cached.Response()
+
+	var warnings []string
+	for _, warning := range values(result.Header, warningField) {
+		if strings.HasPrefix(warning, "2") {
+			warnings = append(warnings, warning)
+		}
+	}
+	result.Header[warningField] = warnings
+
+	for k, v := range resp.Header {
+		if k == warningField {
+			continue
+		}
+		result.Header[k] = v
+	}
+
+	return result
+}
+
+func revalidated(state CachedState, resp *http.Response) bool {
+	return state == Revalidate && resp.StatusCode == http.StatusNotModified
+}
+
+func (t *Transport) cacheIfPossible(req *http.Request, resp *http.Response, reqTime, respTime time.Time) {
+	if !Cacheable(req, resp) {
+		return
+	}
+
+	cached, err := NewCachedResponse(resp, reqTime, respTime)
+	if err != nil {
+		log.Fatal(err)
+	}
+	t.Set(req, cached)
+}
+
+// CachedState represents freshness of a cached response.
+type CachedState int
 
 const (
-	Miss CacheState = iota
+	// Miss means it's not in the cache.
+	Miss CachedState = iota
+
+	// Fresh means it has a cached response and it's available.
 	Fresh
+
+	// Stale means it has a cached response but it's not recommended.
 	Stale
+
+	// Revalidate means it has a cached response but needs confirmation from the backend.
 	Revalidate
 )
 
 // State returns the state of cached response.
-func State(req *http.Request, cached *CachedResponse) (CacheState, time.Duration) {
+func State(req *http.Request, cached *CachedResponse) (CachedState, time.Duration) {
 	if cached == nil {
 		return Miss, time.Duration(0)
 	}
@@ -278,6 +324,15 @@ func parseHTTPTime(s string) (time.Time, error) {
 	return time.Now(), fmt.Errorf("invalid HTTP time: %s", s)
 }
 
+func exceedsMaxStale(cached *CachedResponse, delta time.Duration) bool {
+	maxStale, ok := maxStale(cached)
+	if !ok {
+		return false
+	}
+
+	return maxStale <= delta
+}
+
 func maxStale(cached *CachedResponse) (time.Duration, bool) {
 	matches := matches(cached.Header, cacheControlField, maxStalePattern)
 	if matches == nil {
@@ -297,7 +352,7 @@ func currentAge(cached *CachedResponse) time.Duration {
 }
 
 func residentTime(cached *CachedResponse) time.Duration {
-	return time.Now().Sub(cached.ResponseTime)
+	return time.Since(cached.ResponseTime)
 }
 
 func correctedInitialAge(cached *CachedResponse) time.Duration {
@@ -306,9 +361,9 @@ func correctedInitialAge(cached *CachedResponse) time.Duration {
 
 	if a < c {
 		return c
-	} else {
-		return a
 	}
+
+	return a
 }
 
 func apparentAge(cached *CachedResponse) time.Duration {
@@ -321,9 +376,9 @@ func apparentAge(cached *CachedResponse) time.Duration {
 
 	if time.Duration(0) < a {
 		return a
-	} else {
-		return time.Duration(0)
 	}
+
+	return time.Duration(0)
 }
 
 func dateValue(cached *CachedResponse) (time.Time, bool) {

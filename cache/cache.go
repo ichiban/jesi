@@ -14,41 +14,42 @@ import (
 	"time"
 )
 
+// Cache stores pairs of requests/responses.
 type Cache struct {
 	sync.RWMutex
-	Primary  map[PrimaryKey]*PrimaryEntry
-	History  *list.List
-	MaxBytes uint64
+	URLVars map[URLKey]*Variations
+	History *list.List
+	Max     uint64
+	InUse   uint64
 }
 
-func (c *Cache) Set(req *http.Request, cached *CachedResponse) error {
+// Set inserts/updates a new pair of request/response to the cache.
+func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	c.init()
 
 	c.Lock()
 	defer c.Unlock()
 
-	pKey := NewPrimaryKey(req)
-	pe, ok := c.Primary[pKey]
+	urlKey := NewURLKey(req)
+	variations, ok := c.URLVars[urlKey]
 	if !ok {
-		pe = NewPrimaryEntry(cached)
-		c.Primary[pKey] = pe
+		variations = NewVariations(cached)
+		c.URLVars[urlKey] = variations
 	}
 
-	sKey := NewSecondaryKey(pe, req)
-	if old, ok := pe.Secondary[sKey]; ok && old.Element != nil {
+	varKey := NewVarKey(variations, req)
+	if old, ok := variations.VarResponse[varKey]; ok && old.Element != nil {
 		c.History.Remove(old.Element)
 	}
-	pe.Secondary[sKey] = cached
-	cached.Element = c.History.PushFront(key{primary: pKey, secondary: sKey})
+	variations.VarResponse[varKey] = cached
+	cached.Element = c.History.PushFront(key{primary: urlKey, secondary: varKey})
 
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	log.Printf("inuse: %d", stats.HeapInuse)
-	if c.MaxBytes != 0 && stats.HeapInuse > c.MaxBytes {
+	c.InUse = stats.HeapInuse
+	if c.Max != 0 && stats.HeapInuse > c.Max {
 		c.removeLRU()
 	}
-
-	return nil
 }
 
 func (c *Cache) removeLRU() {
@@ -58,35 +59,36 @@ func (c *Cache) removeLRU() {
 
 	log.Printf("evict: %#v", k)
 
-	pe, ok := c.Primary[k.primary]
+	pe, ok := c.URLVars[k.primary]
 	if !ok {
 		return
 	}
 
-	_, ok = pe.Secondary[k.secondary]
+	_, ok = pe.VarResponse[k.secondary]
 	if ok {
-		delete(pe.Secondary, k.secondary)
+		delete(pe.VarResponse, k.secondary)
 	}
 
-	if len(pe.Secondary) == 0 {
-		delete(c.Primary, k.primary)
+	if len(pe.VarResponse) == 0 {
+		delete(c.URLVars, k.primary)
 	}
 }
 
+// Get retrieves a cached response.
 func (c *Cache) Get(req *http.Request) *CachedResponse {
 	c.init()
 
 	c.RLock()
 	defer c.RUnlock()
 
-	pKey := NewPrimaryKey(req)
-	pe, ok := c.Primary[pKey]
+	pKey := NewURLKey(req)
+	pe, ok := c.URLVars[pKey]
 	if !ok {
 		return nil
 	}
 
-	sKey := NewSecondaryKey(pe, req)
-	cached, ok := pe.Secondary[sKey]
+	sKey := NewVarKey(pe, req)
+	cached, ok := pe.VarResponse[sKey]
 	if !ok {
 		return nil
 	}
@@ -102,8 +104,8 @@ func (c *Cache) init() {
 	c.Lock()
 	defer c.Unlock()
 
-	if c.Primary == nil {
-		c.Primary = make(map[PrimaryKey]*PrimaryEntry)
+	if c.URLVars == nil {
+		c.URLVars = make(map[URLKey]*Variations)
 	}
 
 	if c.History == nil {
@@ -111,34 +113,39 @@ func (c *Cache) init() {
 	}
 }
 
+// Clear removes all request/response pairs which is stored in the cache.
 func (c *Cache) Clear() {
 	c.Lock()
 	defer c.Unlock()
 
-	c.Primary = make(map[PrimaryKey]*PrimaryEntry)
+	c.URLVars = make(map[URLKey]*Variations)
 	c.History.Init()
 }
 
-type PrimaryKey struct {
+// URLKey identifies cached responses with the same URL.
+type URLKey struct {
 	Host  string
 	Path  string
 	Query string
 }
 
-func NewPrimaryKey(req *http.Request) PrimaryKey {
-	return PrimaryKey{
+// NewURLKey returns a primary key of the request.
+func NewURLKey(req *http.Request) URLKey {
+	return URLKey{
 		Host:  req.URL.Host,
 		Path:  req.URL.Path,
 		Query: req.URL.Query().Encode(),
 	}
 }
 
-type PrimaryEntry struct {
-	Fields    []string
-	Secondary map[SecondaryKey]*CachedResponse
+// Variations represents cached responses with the same URL.
+type Variations struct {
+	Fields      []string
+	VarResponse map[VarKey]*CachedResponse
 }
 
-func NewPrimaryEntry(resp *CachedResponse) *PrimaryEntry {
+// NewVariations constructs a new variations for the cached response.
+func NewVariations(resp *CachedResponse) *Variations {
 	var fields []string
 
 	for _, vary := range resp.Header["Vary"] {
@@ -150,15 +157,17 @@ func NewPrimaryEntry(resp *CachedResponse) *PrimaryEntry {
 		}
 	}
 
-	return &PrimaryEntry{
-		Fields:    fields,
-		Secondary: make(map[SecondaryKey]*CachedResponse),
+	return &Variations{
+		Fields:      fields,
+		VarResponse: make(map[VarKey]*CachedResponse),
 	}
 }
 
-type SecondaryKey string
+// VarKey identifies a cached response in variations.
+type VarKey string
 
-func NewSecondaryKey(pe *PrimaryEntry, req *http.Request) SecondaryKey {
+// NewVarKey constructs a new variation key from a request.
+func NewVarKey(pe *Variations, req *http.Request) VarKey {
 	var keys []string
 	for _, fields := range pe.Fields {
 		fields := strings.Split(fields, ",")
@@ -183,9 +192,10 @@ func NewSecondaryKey(pe *PrimaryEntry, req *http.Request) SecondaryKey {
 		}
 	}
 
-	return SecondaryKey(vals.Encode())
+	return VarKey(vals.Encode())
 }
 
+// CachedResponse represents a cached HTTP response.
 type CachedResponse struct {
 	sync.RWMutex
 	Header       http.Header
@@ -195,6 +205,7 @@ type CachedResponse struct {
 	Element      *list.Element
 }
 
+// NewCachedResponse constructs a new cached response.
 func NewCachedResponse(resp *http.Response, reqTime, respTime time.Time) (*CachedResponse, error) {
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
@@ -211,6 +222,7 @@ func NewCachedResponse(resp *http.Response, reqTime, respTime time.Time) (*Cache
 	}, nil
 }
 
+// Response converts a cached response to an HTTP response.
 func (e *CachedResponse) Response() *http.Response {
 	h := http.Header{}
 	for k, v := range e.Header {
@@ -225,6 +237,6 @@ func (e *CachedResponse) Response() *http.Response {
 }
 
 type key struct {
-	primary   PrimaryKey
-	secondary SecondaryKey
+	primary   URLKey
+	secondary VarKey
 }

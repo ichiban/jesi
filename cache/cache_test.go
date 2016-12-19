@@ -30,9 +30,9 @@ func TestCache_Get(t *testing.T) {
 		},
 		{ // when it's cached
 			cache: &Cache{
-				Primary: map[PrimaryKey]*PrimaryEntry{
-					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
-						Secondary: map[SecondaryKey]*CachedResponse{
+				URLVars: map[URLKey]*Variations{
+					URLKey{Host: "www.example.com", Path: "/test"}: {
+						VarResponse: map[VarKey]*CachedResponse{
 							"": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -52,10 +52,10 @@ func TestCache_Get(t *testing.T) {
 		},
 		{ // when it's cached and also the secondary key matches
 			cache: &Cache{
-				Primary: map[PrimaryKey]*PrimaryEntry{
-					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
+				URLVars: map[URLKey]*Variations{
+					URLKey{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						Secondary: map[SecondaryKey]*CachedResponse{
+						VarResponse: map[VarKey]*CachedResponse{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -79,10 +79,10 @@ func TestCache_Get(t *testing.T) {
 		},
 		{ // when it's cached but the secondary key doesn't match
 			cache: &Cache{
-				Primary: map[PrimaryKey]*PrimaryEntry{
-					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
+				URLVars: map[URLKey]*Variations{
+					URLKey{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						Secondary: map[SecondaryKey]*CachedResponse{
+						VarResponse: map[VarKey]*CachedResponse{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -148,8 +148,8 @@ func TestCache_Set(t *testing.T) {
 		req   *http.Request
 		resp  *CachedResponse
 
-		primary   PrimaryKey
-		secondary SecondaryKey
+		primary   URLKey
+		secondary VarKey
 	}{
 		{ // when there's no entry for the request (insert)
 			cache: &Cache{},
@@ -161,14 +161,14 @@ func TestCache_Set(t *testing.T) {
 				Body: []byte{},
 			},
 
-			primary:   PrimaryKey{Host: "www.example.com", Path: "/test"},
+			primary:   URLKey{Host: "www.example.com", Path: "/test"},
 			secondary: "",
 		},
 		{ // when there's an existing entry for the request (replace)
 			cache: &Cache{
-				Primary: map[PrimaryKey]*PrimaryEntry{
-					PrimaryKey{Host: "www.example.com", Path: "/test"}: {
-						Secondary: map[SecondaryKey]*CachedResponse{
+				URLVars: map[URLKey]*Variations{
+					URLKey{Host: "www.example.com", Path: "/test"}: {
+						VarResponse: map[VarKey]*CachedResponse{
 							"": {},
 						},
 					},
@@ -182,7 +182,7 @@ func TestCache_Set(t *testing.T) {
 				Body: []byte{},
 			},
 
-			primary:   PrimaryKey{Host: "www.example.com", Path: "/test"},
+			primary:   URLKey{Host: "www.example.com", Path: "/test"},
 			secondary: "",
 		},
 		{ // when there's Vary header field
@@ -202,7 +202,7 @@ func TestCache_Set(t *testing.T) {
 				},
 			},
 
-			primary:   PrimaryKey{Host: "www.example.com", Path: "/test"},
+			primary:   URLKey{Host: "www.example.com", Path: "/test"},
 			secondary: "Accept=application%2Fjson&Accept-Language=ja-JP",
 		},
 	}
@@ -210,12 +210,12 @@ func TestCache_Set(t *testing.T) {
 	for _, tc := range testCases {
 		tc.cache.Set(tc.req, tc.resp)
 
-		pe, ok := tc.cache.Primary[tc.primary]
+		pe, ok := tc.cache.URLVars[tc.primary]
 		if !ok {
 			t.Errorf("expected cache to have an entry for %#v but not", tc.primary)
 		}
 
-		result, ok := pe.Secondary[tc.secondary]
+		result, ok := pe.VarResponse[tc.secondary]
 		if !ok {
 			t.Errorf("expected %#v to have a response for %#v but not", pe, tc.secondary)
 		}
@@ -251,10 +251,10 @@ func TestCache_Set(t *testing.T) {
 		}
 
 		k := tc.cache.History.Front().Value.(key)
-		if tc.primary != k.primary  {
+		if tc.primary != k.primary {
 			t.Errorf("expected %v, got %v", tc.primary, k.primary)
 		}
-		if tc.secondary != k.secondary  {
+		if tc.secondary != k.secondary {
 			t.Errorf("expected %v, got %v", tc.primary, k.primary)
 		}
 	}

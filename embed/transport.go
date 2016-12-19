@@ -19,14 +19,19 @@ const (
 	links    = "_links"
 	embedded = "_embedded"
 	errs     = "errors"
+
+	warningField = "Warning"
 )
 
+// Transport is an embedding transport.
 type Transport struct {
 	http.RoundTripper
 }
 
 var _ http.RoundTripper = (*Transport)(nil)
 
+// RoundTrip fetches a response from the underlying transport and if it contains links matching the embedding spec,
+// also fetches linked documents and embeds them.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.RoundTripper
 	if base == nil {
@@ -50,12 +55,14 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	}
 
-	if err := resp.Body.Close(); err != nil {
+	err = resp.Body.Close()
+	if err != nil {
 		return resp, err
 	}
 
 	var data map[string]interface{}
-	if err := json.Unmarshal(b, &data); err != nil {
+	err = json.Unmarshal(b, &data)
+	if err != nil {
 		return resp, err
 	}
 
@@ -71,6 +78,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	resp.Body = ioutil.NopCloser(bytes.NewReader(b))
 
+	if _, ok := resp.Header[warningField]; !ok {
+		resp.Header.Set(warningField, `214 - "Transformation Applied"`)
+	}
+
 	return resp, nil
 }
 
@@ -85,7 +96,7 @@ func stripSpec(req *http.Request) []string {
 	return spec
 }
 
-func (e *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec []string) {
+func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec []string) {
 	defer wg.Done()
 
 	if len(spec) == 0 {
@@ -111,55 +122,63 @@ func (e *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[stri
 
 	switch l := l.(type) {
 	case map[string]interface{}:
-		child, err := e.fetch(req, l)
-		if err, ok := err.(*Error); ok {
-			es[errs] = []*Error{err}
-			return
-		}
-		if err != nil {
-			log.Fatal(err)
-		}
-		es[spec[0]] = child
-
-		wg.Add(1)
-		go e.embed(req, wg, child, spec[1:])
+		t.embedOne(req, l, es, spec, wg)
 	case []interface{}:
-		var errMu sync.Mutex
-
-		children := make([]map[string]interface{}, len(l))
-		var cwg sync.WaitGroup
-		for i, m := range l {
-			cwg.Add(1)
-			go func(i int, link map[string]interface{}) {
-				defer cwg.Done()
-
-				child, err := e.fetch(req, link)
-				if err, ok := err.(*Error); ok {
-					errMu.Lock()
-					if _, ok := es[errs]; !ok {
-						var m []*Error
-						es[errs] = m
-					}
-					es[errs] = append(es[errs].([]*Error), err)
-					errMu.Unlock()
-					return
-				}
-				if err != nil {
-					log.Fatal(err)
-				}
-				children[i] = child
-
-				wg.Add(1)
-				go e.embed(req, wg, child, spec[1:])
-			}(i, m.(map[string]interface{}))
-		}
-		cwg.Wait()
-		es[spec[0]] = children
+		t.embedMany(req, l, es, spec, wg)
 	}
 }
 
-func (e *Transport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
-	transport := e.RoundTripper
+func (t *Transport) embedOne(req *http.Request, l, es map[string]interface{}, spec []string, wg *sync.WaitGroup) {
+	child, err := t.fetch(req, l)
+	if err, ok := err.(*Error); ok {
+		es[errs] = []*Error{err}
+		return
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	es[spec[0]] = child
+
+	wg.Add(1)
+	go t.embed(req, wg, child, spec[1:])
+}
+
+func (t *Transport) embedMany(req *http.Request, l []interface{}, es map[string]interface{}, spec []string, wg *sync.WaitGroup) {
+	var errMu sync.Mutex
+
+	children := make([]map[string]interface{}, len(l))
+	var cwg sync.WaitGroup
+	for i, m := range l {
+		cwg.Add(1)
+		go func(i int, link map[string]interface{}) {
+			defer cwg.Done()
+
+			child, err := t.fetch(req, link)
+			if err, ok := err.(*Error); ok {
+				errMu.Lock()
+				if _, ok := es[errs]; !ok {
+					var m []*Error
+					es[errs] = m
+				}
+				es[errs] = append(es[errs].([]*Error), err)
+				errMu.Unlock()
+				return
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			children[i] = child
+
+			wg.Add(1)
+			go t.embed(req, wg, child, spec[1:])
+		}(i, m.(map[string]interface{}))
+	}
+	cwg.Wait()
+	es[spec[0]] = children
+}
+
+func (t *Transport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
+	transport := t.RoundTripper
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
@@ -205,7 +224,11 @@ func (e *Transport) fetch(base *http.Request, link map[string]interface{}) (map[
 			},
 		}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err = resp.Body.Close(); err != nil {
+			log.Fatal(err)
+		}
+	}()
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, &Error{

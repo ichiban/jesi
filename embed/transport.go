@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -20,8 +21,11 @@ const (
 	embedded = "_embedded"
 	errs     = "errors"
 
-	warningField = "Warning"
+	contentTypeField = "Content-Type"
+	warningField     = "Warning"
 )
+
+var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
 
 // Transport is an embedding transport.
 type Transport struct {
@@ -49,20 +53,21 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 
+	if !jsonPattern.MatchString(resp.Header.Get(contentTypeField)) {
+		return resp, nil
+	}
+
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return resp, err
-
 	}
 
-	err = resp.Body.Close()
-	if err != nil {
+	if err = resp.Body.Close(); err != nil {
 		return resp, err
 	}
 
 	var data map[string]interface{}
-	err = json.Unmarshal(b, &data)
-	if err != nil {
+	if err = json.Unmarshal(b, &data); err != nil {
 		return resp, err
 	}
 

@@ -12,7 +12,6 @@ func TestTransport_RoundTrip(t *testing.T) {
 	testCases := []struct {
 		url       string
 		resources map[string]*resource
-		calls     []string
 		body      string
 	}{
 		{ // without 'with' query parameter, it simply returns JSON.
@@ -23,76 +22,71 @@ func TestTransport_RoundTrip(t *testing.T) {
 					body:   `{}`,
 				},
 			},
-			calls: []string{"/test"},
-			body:  `{}`,
+			body: `{}`,
 		},
 		{ // with 'with' query parameter, it embeds resources specified by edges.
-			url: "/pen?with=next.next.next",
+			url: "/a?with=foo.bar.baz",
 			resources: map[string]*resource{
-				"/pen": {
+				"/a": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
-				"/pineapple": {
+				"/b": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}`,
+					body:   `{"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}`,
 				},
-				"/apple": {
+				"/c": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}`,
+					body:   `{"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}`,
 				},
 			},
-			calls: []string{"/pen", "/pineapple", "/apple", "/pen"},
-			body:  `{"_embedded":{"next":{"_embedded":{"next":{"_embedded":{"next":{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}},"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}},"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}},"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+			body: `{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{},"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}},"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
+		},
+		{ // multiple 'with' query parameters are also fine.
+			url: "/a?with=foo.bar.baz&with=foo.qux.quux",
+			resources: map[string]*resource{
+				"/a": {
+					header: http.Header{"Content-Type": []string{"application/json"}},
+					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
+				},
+				"/b": {
+					header: http.Header{"Content-Type": []string{"application/json"}},
+					body:   `{"_links":{"bar":{"href":"/c"},"qux":{"href":"/d"},"self":{"href":"/b"}}}`,
+				},
+				"/c": {
+					header: http.Header{"Content-Type": []string{"application/json"}},
+					body:   `{"_links":{"baz":{"href":"/a"},"self":{"href":"/c"}}}`,
+				},
+				"/d": {
+					header: http.Header{"Content-Type": []string{"application/json"}},
+					body:   `{"_links":{"quux":{"href":"/e"},"self":{"href":"/d"}}}`,
+				},
+				"/e": {
+					header: http.Header{"Content-Type": []string{"application/json"}},
+					body:   `{"_links":{"corge":{"href":"/a"},"self":{"href":"/e"}}}`,
+				},
+			},
+			body: `{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{"baz":{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}},"_links":{"baz":{"href":"/a"},"self":{"href":"/c"}}},"qux":{"_embedded":{"quux":{"_links":{"corge":{"href":"/a"},"self":{"href":"/e"}}}},"_links":{"quux":{"href":"/e"},"self":{"href":"/d"}}}},"_links":{"bar":{"href":"/c"},"qux":{"href":"/d"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},
 		{ // if the response is not JSON, it simply returns the response.
-			url: "/pen?with=next.next.next",
+			url: "/a?with=foo.bar.baz",
 			resources: map[string]*resource{
-				"/pen": {
+				"/a": {
 					header: http.Header{"Content-Type": []string{"application/xml"}},
-					body:   `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
-				},
-				"/pineapple": {
-					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}`,
-				},
-				"/apple": {
-					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}`,
+					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
 			},
-			calls: []string{"/pen"},
-			body:  `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+			body: `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},
 		{ // if the specified edge is not found, it embeds a corresponding error document JSON.
-			url: "/foo?with=bar",
+			url: "/a?with=foo",
 			resources: map[string]*resource{
-				"/foo": {
+				"/a": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
+					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
 			},
-			calls: []string{"/foo"},
-			body:  `{"_embedded":{"errors":[{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/bar"}}]},"_links":{"bar":{"href":"/bar"},"self":{"href":"/foo"}}}`,
-		},
-		{ // if the response is not JSON, it simply returns the response.
-			url: "/pen?with=next.next.next",
-			resources: map[string]*resource{
-				"/pen": {
-					header: http.Header{"Content-Type": []string{"application/xml"}},
-					body:   `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
-				},
-				"/pineapple": {
-					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/apple"},"self":{"href":"/pineapple"}}}`,
-				},
-				"/apple": {
-					header: http.Header{"Content-Type": []string{"application/json"}},
-					body:   `{"_links":{"next":{"href":"/pen"},"self":{"href":"/apple"}}}`,
-				},
-			},
-			calls: []string{"/pen"},
-			body:  `{"_links":{"next":{"href":"/pineapple"},"self":{"href":"/pen"}}}`,
+			body: `{"_embedded":{"errors":[{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/b"}}]},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},
 	}
 
@@ -125,15 +119,12 @@ func TestTransport_RoundTrip(t *testing.T) {
 		if tc.body != string(body) {
 			t.Errorf("expected: %s, got: %s", tc.body, string(body))
 		}
-
-		tt.assert(tc.calls)
 	}
 }
 
 type testTransport struct {
 	T         *testing.T
 	Resources map[string]*resource
-	Actual    []string
 }
 
 var _ http.RoundTripper = (*testTransport)(nil)
@@ -159,21 +150,7 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		Body:       ioutil.NopCloser(strings.NewReader(resource.body)),
 	}
 
-	t.Actual = append(t.Actual, req.URL.String())
-
 	return resp, nil
-}
-
-func (t *testTransport) assert(expectations []string) {
-	if len(expectations) != len(t.Actual) {
-		t.T.Errorf("%d expected, got: %d", len(expectations), len(t.Actual))
-	}
-
-	for i := range t.Actual {
-		if expectations[i] != t.Actual[i] {
-			t.T.Errorf("expected %s, got: %s", expectations[i], t.Actual[i])
-		}
-	}
 }
 
 type resource struct {

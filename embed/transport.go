@@ -90,9 +90,23 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func stripSpec(req *http.Request) []string {
-	w := req.URL.Query().Get(with)
-	spec := strings.Split(w, ".")
+type specifier map[string]specifier
+
+func (s specifier) add(edges []string) {
+	n := s
+	for _, edge := range edges {
+		if _, ok := n[edge]; !ok {
+			n[edge] = make(map[string]specifier)
+		}
+		n = n[edge]
+	}
+}
+
+func stripSpec(req *http.Request) specifier {
+	spec := specifier{}
+	for _, w := range req.URL.Query()[with] {
+		spec.add(strings.Split(w, "."))
+	}
 
 	q := req.URL.Query()
 	q.Del(with)
@@ -101,7 +115,7 @@ func stripSpec(req *http.Request) []string {
 	return spec
 }
 
-func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec []string) {
+func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec specifier) {
 	defer wg.Done()
 
 	if len(spec) == 0 {
@@ -113,11 +127,6 @@ func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[stri
 		return
 	}
 
-	l, ok := ls[spec[0]]
-	if !ok {
-		return
-	}
-
 	es, ok := parent[embedded].(map[string]interface{})
 	if !ok {
 		m := make(map[string]interface{})
@@ -125,15 +134,22 @@ func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[stri
 		es = m
 	}
 
-	switch l := l.(type) {
-	case map[string]interface{}:
-		t.embedOne(req, l, es, spec, wg)
-	case []interface{}:
-		t.embedMany(req, l, es, spec, wg)
+	for edge, next := range spec {
+		l, ok := ls[edge]
+		if !ok {
+			return
+		}
+
+		switch l := l.(type) {
+		case map[string]interface{}:
+			t.embedOne(req, l, es, edge, next, wg)
+		case []interface{}:
+			t.embedMany(req, l, es, edge, next, wg)
+		}
 	}
 }
 
-func (t *Transport) embedOne(req *http.Request, l, es map[string]interface{}, spec []string, wg *sync.WaitGroup) {
+func (t *Transport) embedOne(req *http.Request, l, es map[string]interface{}, edge string, next specifier, wg *sync.WaitGroup) {
 	child, err := t.fetch(req, l)
 	if err, ok := err.(*Error); ok {
 		es[errs] = []*Error{err}
@@ -142,13 +158,13 @@ func (t *Transport) embedOne(req *http.Request, l, es map[string]interface{}, sp
 	if err != nil {
 		log.Fatal(err)
 	}
-	es[spec[0]] = child
+	es[edge] = child
 
 	wg.Add(1)
-	go t.embed(req, wg, child, spec[1:])
+	go t.embed(req, wg, child, next)
 }
 
-func (t *Transport) embedMany(req *http.Request, l []interface{}, es map[string]interface{}, spec []string, wg *sync.WaitGroup) {
+func (t *Transport) embedMany(req *http.Request, l []interface{}, es map[string]interface{}, edge string, next specifier, wg *sync.WaitGroup) {
 	var errMu sync.Mutex
 
 	children := make([]map[string]interface{}, len(l))
@@ -175,11 +191,11 @@ func (t *Transport) embedMany(req *http.Request, l []interface{}, es map[string]
 			children[i] = child
 
 			wg.Add(1)
-			go t.embed(req, wg, child, spec[1:])
+			go t.embed(req, wg, child, next)
 		}(i, m.(map[string]interface{}))
 	}
 	cwg.Wait()
-	es[spec[0]] = children
+	es[edge] = children
 }
 
 func (t *Transport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {

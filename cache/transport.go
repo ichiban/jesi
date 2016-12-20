@@ -77,8 +77,6 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req = revalidateRequest(req, cached)
 	}
 
-	log.Printf("from backend: %s", req.URL)
-
 	reqTime := time.Now()
 	resp, err := t.RoundTripper.RoundTrip(req)
 	respTime := time.Now()

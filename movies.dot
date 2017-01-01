@@ -1,0 +1,27 @@
+digraph movies {
+      pulp_fiction [
+      label=<<B>/movies/1</B><BR/>Pulp Fiction>
+      ];
+
+      vince [
+      label=<<B>/roles/1</B><BR/>Vincent Vega>
+      ];
+      
+      jules [
+      label=<<B>/roles/2</B><BR/>Jules Winnfield>
+      ];
+
+      john_travolta [
+      label=<<B>/actors/1</B><BR/>John Travolta>
+      ];
+
+      samuel_l_jackson [
+      label=<<B>/actors/2</B><BR/>Samuel L. Jackson>
+      ];
+
+      pulp_fiction -> vince [label="roles"];
+      pulp_fiction -> jules [label="roles"];
+
+      vince -> john_travolta [label="actor"];
+      jules -> samuel_l_jackson [label="actor"];
+}

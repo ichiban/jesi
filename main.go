@@ -12,7 +12,11 @@ import (
 	"github.com/ichiban/jesi/embed"
 )
 
+var version string
+
 func main() {
+	log.Printf("version: %s", version)
+
 	var port int
 	var backend string
 	var max uint64
@@ -24,7 +28,7 @@ func main() {
 
 	log.Printf("port: %d", port)
 	log.Printf("backend: %s", backend)
-	log.Printf("size: %d", max)
+	log.Printf("max: %d", max)
 
 	uri, err := url.Parse(backend)
 	if err != nil {

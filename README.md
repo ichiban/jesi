@@ -4,7 +4,18 @@ Jesi (stands for JSON Edge Side Include) is an HTTP reverse proxy that accelerat
 
 ## Getting Started
 
-TODO:
+Install Jesi from GitHub Releases (pick a binary for your platform):
+
+```sh
+$ curl -L https://github.com/ichiban/jesi/releases/download/v0.1.0/jesi-darwin-amd64 > jesi
+$ chmod +x jesi
+```
+
+Then, run it with your backend server:
+
+```sh
+$ ./jesi -backend http://localhost:3000 -max 2147483648 -port 8080
+```
  
 ## Features
 

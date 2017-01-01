@@ -3,6 +3,7 @@ go:
   - 1.7.x
   - tip
 install:
+  - go get -t -v ./...
   - go get github.com/alecthomas/gometalinter
   - gometalinter --install
 gobuild_args: -ldflags "-X main.version=$(git name-rev --tags --name-only $(git rev-parse HEAD))"

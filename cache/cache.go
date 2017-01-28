@@ -20,7 +20,6 @@ type Cache struct {
 	URLVars map[URLKey]*Variations
 	History *list.List
 	Max     uint64
-	InUse   uint64
 }
 
 // Set inserts/updates a new pair of request/response to the cache.
@@ -45,15 +44,22 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	cached.Element = c.History.PushFront(key{primary: urlKey, secondary: varKey})
 
 	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	c.InUse = stats.HeapInuse
-	if c.Max != 0 && stats.HeapInuse > c.Max {
+	for i := 0; i < c.History.Len(); i++ {
+		runtime.ReadMemStats(&stats)
+		log.Printf("inuse: %dB, max: %dB\n", stats.HeapInuse, c.Max)
+		if stats.HeapInuse < c.Max {
+			break
+		}
 		c.removeLRU()
 	}
 }
 
 func (c *Cache) removeLRU() {
 	e := c.History.Back()
+	if e == nil {
+		log.Print("no cached response to free")
+		return
+	}
 	c.History.Remove(e)
 	k := e.Value.(key)
 
@@ -64,8 +70,7 @@ func (c *Cache) removeLRU() {
 		return
 	}
 
-	_, ok = pe.VarResponse[k.secondary]
-	if ok {
+	if _, ok = pe.VarResponse[k.secondary]; ok {
 		delete(pe.VarResponse, k.secondary)
 	}
 

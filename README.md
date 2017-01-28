@@ -22,7 +22,7 @@ $ ./jesi -backend http://localhost:3000 -max 2147483648 -port 8080
 ### Embedding
 
 Jesi understands [JSON Hypertext Application Language aka HAL+JSON](http://tools.ietf.org/html/draft-kelly-json-hal) and can construct complex HAL+JSON documents out of simple HAL+JSON documents from the upstream server.
-By supplying a query parameter `?with=<edges>` with dot separated edge names, it embeds HAL+JSON documents linked by `_links` as `_embeded`.
+By supplying a query parameter `?with=<edges>` with dot separated edge names, it embeds HAL+JSON documents linked by `_links` as `_embeded`. (This functionality is also known as **zooming**)
 
 This will decrease the number of round trips over the Internet which is crucial for speeding up web API backed applications.
 
@@ -41,87 +41,54 @@ Let's consider an example of a movie database app. It has resources of a movie P
 
 ```json
 {
-  "_links": {
-    "roles": [
-      {
-        "href": "/roles/1"
-      },
-      {
-        "href": "/roles/2"
-      }
-    ],
-    "self": {
-      "href": "/movies/1"
-    }
-  },
   "title": "Pulp Fiction",
-  "year": 1994
+  "year": 1994,
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  }
 }
 ```
 
 ```json
 {
+  "name": "Vincent Vega",
   "_links": {
-    "actor": {
-      "href": "/actors/1"
-    },
-    "movie": {
-      "href": "/movies/1"
-    },
-    "self": {
-      "href": "/roles/1"
-    }
-  },
-  "name": "Vincent Vega"
+    "self": {"href": "/roles/1"},
+    "actor": {"href": "/actors/1"},
+    "movie": {"href": "/movies/1"}
+  }
 }
 ```
 
 ```json
 {
+  "name": "Jules Winnfield",
   "_links": {
-    "actor": {
-      "href": "/actors/2"
-    },
-    "movie": {
-      "href": "/movies/1"
-    },
-    "self": {
-      "href": "/roles/2"
-    }
-  },
-  "name": "Jules Winnfield"
+    "self": {"href": "/roles/2"},
+    "actor": {"href": "/actors/2"},
+    "movie": {"href": "/movies/1"}
+  }
 }
 ```
 
 ```json
 {
+  "name": "John Travolta",
   "_links": {
-    "roles": [
-      {
-        "href": "/roles/1"
-      }
-    ],
-    "self": {
-      "href": "/actors/1"
-    }
-  },
-  "name": "John Travolta"
+    "self": {"href": "/actors/1"},
+    "roles": [{"href": "/roles/1"}]
+  }
 }
 ```
 
 ```json
 {
+  "name": "Samuel L. Jackson",
   "_links": {
-    "roles": [
-      {
-        "href": "/roles/2"
-      }
-    ],
-    "self": {
-      "href": "/actors/2"
-    }
-  },
-  "name": "Samuel L. Jackson"
+    "self": {"href": "/actors/2"},
+    "roles": [{"href": "/roles/2"}]
+  }
 }
 ```
 
@@ -134,82 +101,49 @@ By making a request `/movies/1?with=roles.actor`, Jesi responds with one big HAL
 
 ```json
 {
+  "title": "Pulp Fiction",
+  "year": 1994,
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
   "_embedded": {
     "roles": [
       {
+        "name": "Vincent Vega",
+        "_links": {
+          "self": {"href": "/roles/1"},
+          "actor": {"href": "/actors/1"},
+          "movie": {"href": "/movies/1"}
+        },
         "_embedded": {
           "actor": {
+            "name": "John Travolta",
             "_links": {
-              "roles": [
-                {
-                  "href": "/roles/1"
-                }
-              ],
-              "self": {
-                "href": "/actors/1"
-              }
-            },
-            "name": "John Travolta"
+              "self": {"href": "/actors/1"},
+              "roles": [{"href": "/roles/1"}]
+            }
           }
-        },
-        "_links": {
-          "actor": {
-            "href": "/actors/1"
-          },
-          "movie": {
-            "href": "/movies/1"
-          },
-          "self": {
-            "href": "/roles/1"
-          }
-        },
-        "name": "Vincent Vega"
+        }
       },
       {
+        "name": "Jules Winnfield",
+        "_links": {
+          "self": {"href": "/roles/2"},
+          "actor": {"href": "/actors/2"},
+          "movie": {"href": "/movies/1"}
+        },
         "_embedded": {
           "actor": {
+            "name": "Samuel L. Jackson",
             "_links": {
-              "roles": [
-                {
-                  "href": "/roles/2"
-                }
-              ],
-              "self": {
-                "href": "/actors/2"
-              }
-            },
-            "name": "Samuel L. Jackson"
+              "self": {"href": "/actors/2"},
+              "roles": [{"href": "/roles/2"}]
+            }
           }
-        },
-        "_links": {
-          "actor": {
-            "href": "/actors/2"
-          },
-          "movie": {
-            "href": "/movies/1"
-          },
-          "self": {
-            "href": "/roles/2"
-          }
-        },
-        "name": "Jules Winnfield"
+        }
       }
     ]
-  },
-  "_links": {
-    "roles": [
-      {
-        "href": "/roles/1"
-      },
-      {
-        "href": "/roles/2"
-      }
-    ],
-    "self": {
-      "href": "/movies/1"
-    }
-  },
-  "title": "Pulp Fiction",
-  "year": 1994
+  }
 }
 ```

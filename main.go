@@ -23,7 +23,7 @@ func main() {
 
 	flag.IntVar(&port, "port", 8080, "port number")
 	flag.StringVar(&backend, "backend", "http://localhost:3000", "backend server")
-	flag.Uint64Var(&max, "max", 0, "max cache size in bytes")
+	flag.Uint64Var(&max, "max", 64, "max cache size in MB")
 	flag.Parse()
 
 	log.Printf("port: %d", port)
@@ -37,7 +37,7 @@ func main() {
 
 	handler := httputil.NewSingleHostReverseProxy(uri)
 	transport := &cache.Transport{}
-	transport.Cache.Max = max
+	transport.Cache.Max = max * 1024 * 1024
 	handler.Transport = &embed.Transport{RoundTripper: transport}
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),

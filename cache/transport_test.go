@@ -82,7 +82,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 				RoundTripper: &testTransport{},
 				Cache: Cache{
 					URLVars: map[URLKey]*Variations{
-						URLKey{Host: "www.example.com", Path: "/test"}: {
+						URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 							VarResponse: map[VarKey]*CachedResponse{
 								"": {
 									Header: http.Header{

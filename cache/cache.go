@@ -133,6 +133,7 @@ func (c *Cache) Clear() {
 
 // URLKey identifies cached responses with the same URL.
 type URLKey struct {
+	Method string
 	Host  string
 	Path  string
 	Query string
@@ -141,6 +142,7 @@ type URLKey struct {
 // NewURLKey returns a primary key of the request.
 func NewURLKey(req *http.Request) URLKey {
 	return URLKey{
+		Method: req.Method,
 		Host:  req.URL.Host,
 		Path:  req.URL.Path,
 		Query: req.URL.Query().Encode(),

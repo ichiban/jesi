@@ -43,6 +43,10 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	variations.VarResponse[varKey] = cached
 	cached.Element = c.History.PushFront(key{primary: urlKey, secondary: varKey})
 
+	if c.Max == 0 {
+		return
+	}
+
 	var stats runtime.MemStats
 	for i := 0; i < c.History.Len(); i++ {
 		runtime.ReadMemStats(&stats)

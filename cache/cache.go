@@ -122,30 +122,21 @@ func (c *Cache) init() {
 	}
 }
 
-// Clear removes all request/response pairs which is stored in the cache.
-func (c *Cache) Clear() {
-	c.Lock()
-	defer c.Unlock()
-
-	c.URLVars = make(map[URLKey]*Variations)
-	c.History.Init()
-}
-
 // URLKey identifies cached responses with the same URL.
 type URLKey struct {
 	Method string
-	Host  string
-	Path  string
-	Query string
+	Host   string
+	Path   string
+	Query  string
 }
 
 // NewURLKey returns a primary key of the request.
 func NewURLKey(req *http.Request) URLKey {
 	return URLKey{
 		Method: req.Method,
-		Host:  req.URL.Host,
-		Path:  req.URL.Path,
-		Query: req.URL.Query().Encode(),
+		Host:   req.URL.Host,
+		Path:   req.URL.Path,
+		Query:  req.URL.Query().Encode(),
 	}
 }
 

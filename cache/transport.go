@@ -42,6 +42,7 @@ var (
 type Transport struct {
 	http.RoundTripper
 	Cache
+	OriginChangedAt time.Time
 }
 
 var _ http.RoundTripper = (*Transport)(nil)
@@ -50,17 +51,13 @@ var _ http.RoundTripper = (*Transport)(nil)
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.init()
 
-	if !idempotent(req) {
-		return t.roundTripClear(req)
-	}
-
 	cached := t.Get(req)
 	if cached != nil {
 		cached.RLock()
 		defer cached.RUnlock()
 	}
 
-	state, delta := State(req, cached)
+	state, delta := t.State(req, cached)
 	switch state {
 	case Fresh:
 		log.Printf("fresh: %s", req.URL)
@@ -89,6 +86,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 
+	if originChanged(req, resp) {
+		t.OriginChangedAt = respTime
+	}
+
 	if revalidated(state, resp) {
 		log.Printf("validated: %s", req.URL)
 		resp = revalidatedResponse(resp, cached)
@@ -107,17 +108,8 @@ func (t *Transport) init() {
 	t.RoundTripper = http.DefaultTransport
 }
 
-func (t *Transport) roundTripClear(req *http.Request) (*http.Response, error) {
-	resp, err := t.RoundTripper.RoundTrip(req)
-	if err != nil {
-		return resp, err
-	}
-
-	if successful(resp) {
-		t.Clear()
-	}
-
-	return resp, nil
+func originChanged(req *http.Request, resp *http.Response) bool {
+	return !idempotent(req) && successful(resp)
 }
 
 func idempotent(req *http.Request) bool {
@@ -211,7 +203,7 @@ const (
 )
 
 // State returns the state of cached response.
-func State(req *http.Request, cached *CachedResponse) (CachedState, time.Duration) {
+func (t *Transport) State(req *http.Request, cached *CachedResponse) (CachedState, time.Duration) {
 	if cached == nil {
 		return Miss, time.Duration(0)
 	}
@@ -230,6 +222,12 @@ func State(req *http.Request, cached *CachedResponse) (CachedState, time.Duratio
 
 	if lifetime, ok := freshnessLifetime(cached); ok {
 		age := currentAge(cached)
+
+		// cached responses before the last destructive requests (e.g. POST) are considered outdated.
+		if time.Since(t.OriginChangedAt) <= age {
+			return Revalidate, time.Duration(0)
+		}
+
 		delta := age - lifetime
 		if lifetime > age {
 			return Fresh, delta

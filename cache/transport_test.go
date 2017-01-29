@@ -344,7 +344,7 @@ func TestCacheable(t *testing.T) {
 	}
 }
 
-func TestState(t *testing.T) {
+func TestTransport_State(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
 	if err != nil {
 		t.Fatal(err)
@@ -353,6 +353,7 @@ func TestState(t *testing.T) {
 	now := time.Now()
 
 	testCases := []struct {
+		originChangedAt time.Time
 		req    *http.Request
 		cached *CachedResponse
 
@@ -411,6 +412,24 @@ func TestState(t *testing.T) {
 			cached: &CachedResponse{
 				Header: http.Header{
 					"Cache-Control": []string{"no-cache"},
+				},
+				Body:         []byte{},
+				RequestTime:  now.Add(-2 * time.Second),
+				ResponseTime: now.Add(-1 * time.Second),
+			},
+
+			state: Revalidate,
+			delta: time.Duration(0),
+		},
+		{
+			originChangedAt: now,
+			req: &http.Request{
+				URL:    url,
+				Header: http.Header{},
+			},
+			cached: &CachedResponse{
+				Header: http.Header{
+					"Cache-Control": []string{"s-maxage=3"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
@@ -523,7 +542,8 @@ func TestState(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		s, d := State(tc.req, tc.cached)
+		tr := Transport{OriginChangedAt: tc.originChangedAt}
+		s, d := tr.State(tc.req, tc.cached)
 
 		if tc.state != s {
 			t.Errorf("(%d) expected %d, got %d", i, tc.state, s)

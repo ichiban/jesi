@@ -31,7 +31,7 @@ func TestCache_Get(t *testing.T) {
 		{ // when it's cached
 			cache: &Cache{
 				URLVars: map[URLKey]*Variations{
-					URLKey{Host: "www.example.com", Path: "/test"}: {
+					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						VarResponse: map[VarKey]*CachedResponse{
 							"": {
 								Body: []byte(`{"foo":"bar"}`),
@@ -53,7 +53,7 @@ func TestCache_Get(t *testing.T) {
 		{ // when it's cached and also the secondary key matches
 			cache: &Cache{
 				URLVars: map[URLKey]*Variations{
-					URLKey{Host: "www.example.com", Path: "/test"}: {
+					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
 						VarResponse: map[VarKey]*CachedResponse{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
@@ -80,7 +80,7 @@ func TestCache_Get(t *testing.T) {
 		{ // when it's cached but the secondary key doesn't match
 			cache: &Cache{
 				URLVars: map[URLKey]*Variations{
-					URLKey{Host: "www.example.com", Path: "/test"}: {
+					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
 						VarResponse: map[VarKey]*CachedResponse{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
@@ -97,6 +97,25 @@ func TestCache_Get(t *testing.T) {
 					"Accept":          []string{"application/json"},
 					"Accept-Language": []string{"en-US"},
 				},
+			},
+
+			resp: nil,
+		},
+		{ // when it's cached but the method doesn't match
+			cache: &Cache{
+				URLVars: map[URLKey]*Variations{
+					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+						VarResponse: map[VarKey]*CachedResponse{
+							"": {
+								Body: []byte(`{"foo":"bar"}`),
+							},
+						},
+					},
+				},
+			},
+			req: &http.Request{
+				Method: http.MethodHead,
+				URL:    url,
 			},
 
 			resp: nil,
@@ -161,13 +180,13 @@ func TestCache_Set(t *testing.T) {
 				Body: []byte{},
 			},
 
-			primary:   URLKey{Host: "www.example.com", Path: "/test"},
+			primary:   URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
 			secondary: "",
 		},
 		{ // when there's an existing entry for the request (replace)
 			cache: &Cache{
 				URLVars: map[URLKey]*Variations{
-					URLKey{Host: "www.example.com", Path: "/test"}: {
+					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						VarResponse: map[VarKey]*CachedResponse{
 							"": {},
 						},
@@ -182,7 +201,7 @@ func TestCache_Set(t *testing.T) {
 				Body: []byte{},
 			},
 
-			primary:   URLKey{Host: "www.example.com", Path: "/test"},
+			primary:   URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
 			secondary: "",
 		},
 		{ // when there's Vary header field
@@ -202,7 +221,7 @@ func TestCache_Set(t *testing.T) {
 				},
 			},
 
-			primary:   URLKey{Host: "www.example.com", Path: "/test"},
+			primary:   URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
 			secondary: "Accept=application%2Fjson&Accept-Language=ja-JP",
 		},
 	}

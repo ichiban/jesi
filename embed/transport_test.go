@@ -1,7 +1,6 @@
 package embed
 
 import (
-	"bytes"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -11,12 +10,13 @@ import (
 func TestTransport_RoundTrip(t *testing.T) {
 	testCases := []struct {
 		url       string
-		resources map[string]*resource
+		resources map[string]*testResource
+		header    http.Header
 		body      string
 	}{
 		{ // without 'with' query parameter, it simply returns JSON.
 			url: "/test",
-			resources: map[string]*resource{
+			resources: map[string]*testResource{
 				"/test": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
 					body:   `{}`,
@@ -26,7 +26,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 		},
 		{ // with 'with' query parameter, it embeds resources specified by edges.
 			url: "/a?with=foo.bar.baz",
-			resources: map[string]*resource{
+			resources: map[string]*testResource{
 				"/a": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
 					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
@@ -44,7 +44,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 		},
 		{ // multiple 'with' query parameters are also fine.
 			url: "/a?with=foo.bar.baz&with=foo.qux.quux",
-			resources: map[string]*resource{
+			resources: map[string]*testResource{
 				"/a": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
 					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
@@ -70,7 +70,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 		},
 		{ // if the response is not JSON, it simply returns the response.
 			url: "/a?with=foo.bar.baz",
-			resources: map[string]*resource{
+			resources: map[string]*testResource{
 				"/a": {
 					header: http.Header{"Content-Type": []string{"application/xml"}},
 					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
@@ -80,20 +80,51 @@ func TestTransport_RoundTrip(t *testing.T) {
 		},
 		{ // if the specified edge is not found, it embeds a corresponding error document JSON.
 			url: "/a?with=foo",
-			resources: map[string]*resource{
+			resources: map[string]*testResource{
 				"/a": {
 					header: http.Header{"Content-Type": []string{"application/json"}},
 					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
 			},
-			body: `{"_embedded":{"errors":[{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/b"}}]},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
+			body: `{"_embedded":{"foo":{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/b"}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
+		},
+		{ // the resulting Cache-Control is the weakest of all.
+			url: "/a?with=foo.bar.baz",
+			resources: map[string]*testResource{
+				"/a": {
+					header: http.Header{
+						"Content-Type":  []string{"application/json"},
+						"Cache-Control": []string{"public,max-age=30"},
+					},
+					body: `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
+				},
+				"/b": {
+					header: http.Header{
+						"Content-Type":  []string{"application/json"},
+						"Cache-Control": []string{"private,max-age=20"},
+					},
+					body: `{"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}`,
+				},
+				"/c": {
+					header: http.Header{
+						"Content-Type":  []string{"application/json"},
+						"Cache-Control": []string{"public,max-age=10"},
+					},
+					body: `{"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}`,
+				},
+			},
+			header: http.Header{
+				"Content-Type":  []string{"application/json"},
+				"Cache-Control": []string{"private,max-age=10"},
+			},
+			body: `{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{},"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}},"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},
 	}
 
-	for _, tc := range testCases {
-		req, err := http.NewRequest(http.MethodGet, tc.url, bytes.NewReader([]byte{}))
+	for i, tc := range testCases {
+		req, err := http.NewRequest(http.MethodGet, tc.url, nil)
 		if err != nil {
-			t.Errorf("err is not nil: %v", err)
+			t.Errorf("(%d) err is not nil: %v", i, err)
 		}
 
 		tt := &testTransport{
@@ -104,27 +135,36 @@ func TestTransport_RoundTrip(t *testing.T) {
 
 		r, err := e.RoundTrip(req)
 		if err != nil {
-			t.Errorf("err is not nil: %v", err)
+			t.Errorf("(%d) err is not nil: %v", i, err)
 		}
 
 		if http.StatusOK != r.StatusCode {
-			t.Errorf("expected 200, got %d, %s", r.StatusCode, req.URL)
+			t.Errorf("(%d) expected 200, got %d, %s", i, r.StatusCode, req.URL)
+		}
+
+		for k, vs := range tc.header {
+			for i, v := range vs {
+				if v != r.Header[k][i] {
+					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, r.Header[k][i])
+				}
+
+			}
 		}
 
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			t.Errorf("err is not nil: %v", err)
+			t.Errorf("(%d) err is not nil: %v", i, err)
 		}
 
 		if tc.body != string(body) {
-			t.Errorf("expected: %s, got: %s", tc.body, string(body))
+			t.Errorf("(%d) expected: %s, got: %s", i, tc.body, string(body))
 		}
 	}
 }
 
 type testTransport struct {
 	T         *testing.T
-	Resources map[string]*resource
+	Resources map[string]*testResource
 }
 
 var _ http.RoundTripper = (*testTransport)(nil)
@@ -153,7 +193,7 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-type resource struct {
+type testResource struct {
 	header http.Header
 	body   string
 }

@@ -3,14 +3,12 @@ package embed
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
-	"sync"
 )
 
 const (
@@ -19,7 +17,6 @@ const (
 	href     = "href"
 	links    = "_links"
 	embedded = "_embedded"
-	errs     = "errors"
 
 	contentTypeField = "Content-Type"
 	warningField     = "Warning"
@@ -71,12 +68,16 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go t.embed(req, &wg, data, spec)
-	wg.Wait()
+	res := &resource{
+		cacheControl: NewCacheControl(resp),
+		data:         data,
+	}
+	t.embed(req, res, spec)
 
-	b, err = json.Marshal(data)
+	delete(resp.Header, expires)
+	resp.Header[cacheControl] = []string{res.cacheControl.String()}
+
+	b, err = json.Marshal(res.data)
 	if err != nil {
 		return resp, err
 	}
@@ -115,18 +116,20 @@ func stripSpec(req *http.Request) specifier {
 	return spec
 }
 
-func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[string]interface{}, spec specifier) {
-	defer wg.Done()
+type resource struct {
+	edge         string
+	pos          *int
+	cacheControl *CacheControl
+	data         interface{}
+}
 
+func (t *Transport) embed(req *http.Request, res *resource, spec specifier) {
 	if len(spec) == 0 {
 		return
 	}
 
-	ls, ok := parent[links].(map[string]interface{})
-	if !ok {
-		return
-	}
-
+	parent := res.data.(map[string]interface{})
+	ls := parent[links].(map[string]interface{})
 	es, ok := parent[embedded].(map[string]interface{})
 	if !ok {
 		m := make(map[string]interface{})
@@ -134,102 +137,74 @@ func (t *Transport) embed(req *http.Request, wg *sync.WaitGroup, parent map[stri
 		es = m
 	}
 
+	ch := make(chan *resource, len(spec))
+	count := 0
 	for edge, next := range spec {
 		l, ok := ls[edge]
 		if !ok {
-			return
+			continue
 		}
 
 		switch l := l.(type) {
 		case map[string]interface{}:
-			t.embedOne(req, l, es, edge, next, wg)
+			count++
+			go t.fetch(req, edge, nil, l[href].(string), next, ch)
 		case []interface{}:
-			t.embedMany(req, l, es, edge, next, wg)
+			es[edge] = make([]interface{}, len(l))
+			for i, l := range l {
+				i := i
+				l := l.(map[string]interface{})
+				count++
+				go t.fetch(req, edge, &i, l[href].(string), next, ch)
+			}
 		}
 	}
+
+	for i := 0; i < count; i++ {
+		sub := <-ch
+		if sub.pos == nil {
+			es[sub.edge] = sub.data
+		} else {
+			es[sub.edge].([]interface{})[*sub.pos] = sub.data
+		}
+		res.cacheControl = res.cacheControl.Merge(sub.cacheControl)
+	}
 }
 
-func (t *Transport) embedOne(req *http.Request, l, es map[string]interface{}, edge string, next specifier, wg *sync.WaitGroup) {
-	child, err := t.fetch(req, l)
-	if err, ok := err.(*Error); ok {
-		es[errs] = []*Error{err}
-		return
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-	es[edge] = child
-
-	wg.Add(1)
-	go t.embed(req, wg, child, next)
-}
-
-func (t *Transport) embedMany(req *http.Request, l []interface{}, es map[string]interface{}, edge string, next specifier, wg *sync.WaitGroup) {
-	var errMu sync.Mutex
-
-	children := make([]map[string]interface{}, len(l))
-	var cwg sync.WaitGroup
-	for i, m := range l {
-		cwg.Add(1)
-		go func(i int, link map[string]interface{}) {
-			defer cwg.Done()
-
-			child, err := t.fetch(req, link)
-			if err, ok := err.(*Error); ok {
-				errMu.Lock()
-				if _, ok := es[errs]; !ok {
-					var m []*Error
-					es[errs] = m
-				}
-				es[errs] = append(es[errs].([]*Error), err)
-				errMu.Unlock()
-				return
-			}
-			if err != nil {
-				log.Fatal(err)
-			}
-			children[i] = child
-
-			wg.Add(1)
-			go t.embed(req, wg, child, next)
-		}(i, m.(map[string]interface{}))
-	}
-	cwg.Wait()
-	es[edge] = children
-}
-
-func (t *Transport) fetch(base *http.Request, link map[string]interface{}) (map[string]interface{}, error) {
+func (t *Transport) fetch(base *http.Request, edge string, pos *int, href string, next specifier, ch chan<- *resource) {
 	transport := t.RoundTripper
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
 
-	h, ok := link[href].(string)
-	if !ok {
-		return nil, &Error{
-			Title:  "Malformed Link",
-			Detail: fmt.Sprintf("href not found in %v", link),
-		}
-	}
-
-	uri, err := url.Parse(h)
+	uri, err := url.Parse(href)
 	if err != nil {
-		return nil, &Error{
-			Title:  "Malformed URL",
-			Detail: err.Error(),
-			Links: map[string]interface{}{
-				about: h,
+		ch <- &resource{
+			edge:         edge,
+			pos:          pos,
+			cacheControl: &CacheControl{},
+			data: &Error{
+				Title:  "Malformed URL",
+				Detail: err.Error(),
+				Links: map[string]interface{}{
+					about: href,
+				},
 			},
 		}
 	}
 
 	req, err := http.NewRequest(http.MethodGet, base.URL.ResolveReference(uri).String(), nil)
 	if err != nil {
-		return nil, &Error{
-			Title:  "Malformed Subrequest",
-			Detail: err.Error(),
-			Links: map[string]interface{}{
-				about: h,
+		ch <- &resource{
+			edge:         edge,
+			pos:          pos,
+			cacheControl: &CacheControl{},
+			data: &Error{
+				Title:  "Malformed Subrequest",
+				Detail: err.Error(),
+				Links: map[string]interface{}{
+					about: href,
+				},
 			},
 		}
 	}
@@ -237,11 +212,16 @@ func (t *Transport) fetch(base *http.Request, link map[string]interface{}) (map[
 
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
-		return nil, &Error{
-			Title:  "Round Trip Error",
-			Detail: err.Error(),
-			Links: map[string]interface{}{
-				about: h,
+		ch <- &resource{
+			edge:         edge,
+			pos:          pos,
+			cacheControl: &CacheControl{},
+			data: &Error{
+				Title:  "Round Trip Error",
+				Detail: err.Error(),
+				Links: map[string]interface{}{
+					about: href,
+				},
 			},
 		}
 	}
@@ -252,37 +232,63 @@ func (t *Transport) fetch(base *http.Request, link map[string]interface{}) (map[
 	}()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, &Error{
-			Status: resp.StatusCode,
-			Title:  "Error Response",
-			Detail: http.StatusText(resp.StatusCode),
-			Links: map[string]interface{}{
-				about: h,
+		ch <- &resource{
+			edge:         edge,
+			pos:          pos,
+			cacheControl: &CacheControl{},
+			data: &Error{
+				Status: resp.StatusCode,
+				Title:  "Error Response",
+				Detail: http.StatusText(resp.StatusCode),
+				Links: map[string]interface{}{
+					about: href,
+				},
 			},
 		}
 	}
 
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, &Error{
-			Title:  "Read Error",
-			Detail: err.Error(),
-			Links: map[string]interface{}{
-				about: h,
+		ch <- &resource{
+			edge:         edge,
+			pos:          pos,
+			cacheControl: &CacheControl{},
+			data: &Error{
+				Title:  "Read Error",
+				Detail: err.Error(),
+				Links: map[string]interface{}{
+					about: href,
+				},
 			},
 		}
 	}
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(b, &data); err != nil {
-		return nil, &Error{
-			Title:  "Malformed JSON",
-			Detail: err.Error(),
-			Links: map[string]interface{}{
-				about: h,
+		ch <- &resource{
+			edge:         edge,
+			pos:          pos,
+			cacheControl: &CacheControl{},
+			data: &Error{
+				Title:  "Malformed JSON",
+				Detail: err.Error(),
+				Links: map[string]interface{}{
+					about: href,
+				},
 			},
 		}
 	}
 
-	return data, nil
+	res := &resource{
+		cacheControl: NewCacheControl(resp),
+		data:         data,
+	}
+	t.embed(req, res, next)
+
+	ch <- &resource{
+		edge:         edge,
+		pos:          pos,
+		cacheControl: res.cacheControl,
+		data:         res.data,
+	}
 }

@@ -354,8 +354,8 @@ func TestTransport_State(t *testing.T) {
 
 	testCases := []struct {
 		originChangedAt time.Time
-		req    *http.Request
-		cached *CachedResponse
+		req             *http.Request
+		cached          *CachedResponse
 
 		state CachedState
 		delta time.Duration

@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/ichiban/jesi/cache"
+	"github.com/ichiban/jesi/conditional"
 	"github.com/ichiban/jesi/embed"
 )
 
@@ -36,9 +37,15 @@ func main() {
 	}
 
 	handler := httputil.NewSingleHostReverseProxy(uri)
-	transport := &cache.Transport{}
-	transport.Cache.Max = max * 1024 * 1024
-	handler.Transport = &embed.Transport{RoundTripper: transport}
+	handler.Transport = &conditional.Transport{
+		RoundTripper: &embed.Transport{
+			RoundTripper: &cache.Transport{
+				Cache: cache.Cache{
+					Max: max * 1024 * 1024,
+				},
+			},
+		},
+	}
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Handler: handler,

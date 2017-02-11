@@ -2,7 +2,10 @@ package embed
 
 import (
 	"bytes"
+	"crypto/md5" // #nosec
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -20,6 +23,7 @@ const (
 
 	contentTypeField = "Content-Type"
 	warningField     = "Warning"
+	etagField        = "Etag"
 )
 
 var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
@@ -81,6 +85,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return resp, err
 	}
+
+	h := md5.New() // #nosec
+	_, _ = h.Write(b)
+	etag := fmt.Sprintf(`W/"%s"`, hex.EncodeToString(h.Sum(nil)))
+	resp.Header[etagField] = []string{etag}
 
 	resp.Body = ioutil.NopCloser(bytes.NewReader(b))
 

@@ -13,14 +13,16 @@ func TestError_Error(t *testing.T) {
 	}{
 		{
 			err: &Error{
+				Type:  "https://www.example.com/failed",
 				Title: "something went wrong",
 			},
-			json: `{"title":"something went wrong"}`,
+			json: `{"type":"https://www.example.com/failed","title":"something went wrong"}`,
 		},
 		{
 			err: &Error{
+				Type:   "https://ichiban.github.io/jesi/problems/response-error",
+				Title:  "Response Error",
 				Status: http.StatusNotFound,
-				Title:  "Error Response",
 				Detail: http.StatusText(http.StatusNotFound),
 				Links: map[string]interface{}{
 					"about": map[string]interface{}{
@@ -28,7 +30,7 @@ func TestError_Error(t *testing.T) {
 					},
 				},
 			},
-			json: `{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":{"href":"/foo"}}}`,
+			json: `{"type":"https://ichiban.github.io/jesi/problems/response-error","title":"Response Error","status":404,"detail":"Not Found","_links":{"about":{"href":"/foo"}}}`,
 		},
 	}
 

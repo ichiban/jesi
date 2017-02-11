@@ -86,7 +86,7 @@ func TestTransport_RoundTrip(t *testing.T) {
 					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
 			},
-			body: `{"_embedded":{"foo":{"status":404,"title":"Error Response","detail":"Not Found","_links":{"about":"/b"}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
+			body: `{"_embedded":{"foo":{"type":"https://ichiban.github.io/jesi/problems/response-error","title":"Response Error","status":404,"detail":"Not Found","_links":{"about":"/b"}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},
 		{ // the resulting Cache-Control is the weakest of all.
 			url: "/a?with=foo.bar.baz",

@@ -179,51 +179,18 @@ func (t *Transport) fetch(base *http.Request, edge string, pos *int, href string
 
 	uri, err := url.Parse(href)
 	if err != nil {
-		ch <- &resource{
-			edge:         edge,
-			pos:          pos,
-			cacheControl: &CacheControl{},
-			data: &Error{
-				Title:  "Malformed URL",
-				Detail: err.Error(),
-				Links: map[string]interface{}{
-					about: href,
-				},
-			},
-		}
+		ch <- errorResource(edge, pos, NewMalformedURLError(err))
 	}
 
 	req, err := http.NewRequest(http.MethodGet, base.URL.ResolveReference(uri).String(), nil)
 	if err != nil {
-		ch <- &resource{
-			edge:         edge,
-			pos:          pos,
-			cacheControl: &CacheControl{},
-			data: &Error{
-				Title:  "Malformed Subrequest",
-				Detail: err.Error(),
-				Links: map[string]interface{}{
-					about: href,
-				},
-			},
-		}
+		ch <- errorResource(edge, pos, NewMalformedSubRequestError(err, uri))
 	}
 	req.Header = base.Header
 
 	resp, err := transport.RoundTrip(req)
 	if err != nil {
-		ch <- &resource{
-			edge:         edge,
-			pos:          pos,
-			cacheControl: &CacheControl{},
-			data: &Error{
-				Title:  "Round Trip Error",
-				Detail: err.Error(),
-				Links: map[string]interface{}{
-					about: href,
-				},
-			},
-		}
+		ch <- errorResource(edge, pos, NewRoundTripError(err, uri))
 	}
 	defer func() {
 		if err = resp.Body.Close(); err != nil {
@@ -232,51 +199,17 @@ func (t *Transport) fetch(base *http.Request, edge string, pos *int, href string
 	}()
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		ch <- &resource{
-			edge:         edge,
-			pos:          pos,
-			cacheControl: &CacheControl{},
-			data: &Error{
-				Status: resp.StatusCode,
-				Title:  "Error Response",
-				Detail: http.StatusText(resp.StatusCode),
-				Links: map[string]interface{}{
-					about: href,
-				},
-			},
-		}
+		ch <- errorResource(edge, pos, NewResponseError(resp, uri))
 	}
 
 	b, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		ch <- &resource{
-			edge:         edge,
-			pos:          pos,
-			cacheControl: &CacheControl{},
-			data: &Error{
-				Title:  "Read Error",
-				Detail: err.Error(),
-				Links: map[string]interface{}{
-					about: href,
-				},
-			},
-		}
+		ch <- errorResource(edge, pos, NewResponseBodyReadError(err, uri))
 	}
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(b, &data); err != nil {
-		ch <- &resource{
-			edge:         edge,
-			pos:          pos,
-			cacheControl: &CacheControl{},
-			data: &Error{
-				Title:  "Malformed JSON",
-				Detail: err.Error(),
-				Links: map[string]interface{}{
-					about: href,
-				},
-			},
-		}
+		ch <- errorResource(edge, pos, NewMalformedJSONError(err, uri))
 	}
 
 	res := &resource{
@@ -290,5 +223,16 @@ func (t *Transport) fetch(base *http.Request, edge string, pos *int, href string
 		pos:          pos,
 		cacheControl: res.cacheControl,
 		data:         res.data,
+	}
+}
+
+func errorResource(edge string, pos *int, e *Error) *resource {
+	return &resource{
+		edge: edge,
+		pos:  pos,
+		cacheControl: &CacheControl{
+			NoCache: true,
+		},
+		data: e,
 	}
 }

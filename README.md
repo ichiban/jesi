@@ -14,7 +14,7 @@ $ chmod +x jesi
 Then, run it with your backend server:
 
 ```sh
-$ ./jesi -backend http://localhost:3000 -max 2147483648 -port 8080
+$ ./jesi -backend http://localhost:3000 -port 8080
 ```
  
 ## Features

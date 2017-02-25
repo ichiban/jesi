@@ -1,9 +1,10 @@
 package embed
 
 import (
-	"github.com/ichiban/jesi/common"
 	"net/http"
 	"testing"
+
+	"github.com/ichiban/jesi/common"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {

@@ -1,13 +1,14 @@
 package cache
 
 import (
-	"github.com/ichiban/jesi/common"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {

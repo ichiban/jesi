@@ -2,7 +2,6 @@ package cache
 
 import (
 	"container/list"
-	"github.com/ichiban/jesi/common"
 	"log"
 	"net/http"
 	"net/url"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 // Cache stores pairs of requests/responses.

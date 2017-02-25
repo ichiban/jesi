@@ -1,10 +1,11 @@
 package embed
 
 import (
-	"github.com/ichiban/jesi/common"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 func TestNewCacheControl(t *testing.T) {

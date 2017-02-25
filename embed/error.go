@@ -2,8 +2,9 @@ package embed
 
 import (
 	"fmt"
-	"github.com/ichiban/jesi/common"
 	"net/http"
+
+	"github.com/ichiban/jesi/common"
 )
 
 // Error represents an embedding error.

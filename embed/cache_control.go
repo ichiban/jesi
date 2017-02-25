@@ -2,10 +2,11 @@ package embed
 
 import (
 	"fmt"
-	"github.com/ichiban/jesi/common"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 // CacheControl represents a response's cache policy.

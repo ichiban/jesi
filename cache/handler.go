@@ -2,7 +2,6 @@ package cache
 
 import (
 	"fmt"
-	"github.com/ichiban/jesi/common"
 	"io"
 	"log"
 	"net/http"
@@ -10,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 const (

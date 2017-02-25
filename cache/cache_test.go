@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"testing"
@@ -246,23 +245,18 @@ func TestCache_Set(t *testing.T) {
 		}
 
 		for k := range tc.resp.Header {
-			if len(tc.resp.Header) != len(resp.Header) {
-				t.Errorf("expected %d, got %d", len(tc.resp.Header), len(resp.Header))
+			if len(tc.resp.Header) != len(resp.HeaderMap) {
+				t.Errorf("expected %d, got %d", len(tc.resp.Header), len(resp.HeaderMap))
 			}
 			for i := 0; i < len(tc.resp.Header[k]); i++ {
-				if tc.resp.Header[k][i] != resp.Header[k][i] {
-					t.Errorf("for header %s, expected %#v, got %#v", k, tc.resp.Header[k][i], resp.Header[k][i])
+				if tc.resp.Header[k][i] != resp.HeaderMap[k][i] {
+					t.Errorf("for header %s, expected %#v, got %#v", k, tc.resp.Header[k][i], resp.HeaderMap[k][i])
 				}
 			}
 		}
 
-		actual, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			t.Error(err)
-		}
-
-		if string(tc.resp.Body) != string(actual) {
-			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(actual))
+		if string(tc.resp.Body) != string(resp.Body) {
+			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(resp.Body))
 		}
 
 		if tc.cache.History.Len() != 1 {

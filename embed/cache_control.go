@@ -2,7 +2,7 @@ package embed
 
 import (
 	"fmt"
-	"net/http"
+	"github.com/ichiban/jesi/common"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +34,7 @@ const (
 )
 
 // NewCacheControl creates a new instance of CacheControl from related headers in the given HTTP response.
-func NewCacheControl(resp *http.Response) *CacheControl {
+func NewCacheControl(resp *common.ResponseBuffer) *CacheControl {
 	c := newCacheControlExpires(resp)
 
 	for _, d := range directives(resp) {
@@ -66,10 +66,10 @@ func NewCacheControl(resp *http.Response) *CacheControl {
 }
 
 // Convert Expires to Cache-Control: max-age
-func newCacheControlExpires(resp *http.Response) *CacheControl {
+func newCacheControlExpires(resp *common.ResponseBuffer) *CacheControl {
 	var c CacheControl
 
-	e, ok := resp.Header[expires]
+	e, ok := resp.HeaderMap[expires]
 	if !ok {
 		return &c
 	}
@@ -82,7 +82,7 @@ func newCacheControlExpires(resp *http.Response) *CacheControl {
 		return &c
 	}
 
-	d, ok := resp.Header[date]
+	d, ok := resp.HeaderMap[date]
 	if !ok {
 		return &c
 	}
@@ -100,9 +100,9 @@ func newCacheControlExpires(resp *http.Response) *CacheControl {
 
 // TODO: Proper directive parsing.
 // Cache-Control directives can be something like `private="foo,bar,baz"`.
-func directives(resp *http.Response) []string {
+func directives(resp *common.ResponseBuffer) []string {
 	ds := []string{}
-	for _, v := range resp.Header[cacheControl] {
+	for _, v := range resp.HeaderMap[cacheControl] {
 		for _, d := range strings.Split(v, ",") {
 			d = strings.Trim(d, " ")
 			ds = append(ds, d)

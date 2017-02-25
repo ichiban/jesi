@@ -1,17 +1,17 @@
 package embed
 
 import (
-	"bytes"
 	"crypto/md5" // #nosec
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/ichiban/jesi/common"
 )
 
 const (
@@ -28,76 +28,63 @@ const (
 
 var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
 
-// Transport is an embedding transport.
-type Transport struct {
-	http.RoundTripper
+// Handler is an embedding handler.
+type Handler struct {
+	Next http.Handler
 }
 
-var _ http.RoundTripper = (*Transport)(nil)
+var _ http.Handler = (*Handler)(nil)
 
-// RoundTrip fetches a response from the underlying transport and if it contains links matching the embedding spec,
+// ServeHTTP fetches a response from the underlying handler and if it contains links matching the embedding spec,
 // also fetches linked documents and embeds them.
-func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	base := t.RoundTripper
-	if base == nil {
-		base = http.DefaultTransport
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		h.Next.ServeHTTP(w, r)
+		return
 	}
 
-	if req.Method != http.MethodGet {
-		return base.RoundTrip(req)
-	}
+	spec := stripSpec(r)
 
-	spec := stripSpec(req)
+	var resp common.ResponseBuffer
+	h.Next.ServeHTTP(&resp, r)
+	defer func() {
+		if _, err := resp.WriteTo(w); err != nil {
+			log.Print(err)
+		}
+	}()
 
-	resp, err := base.RoundTrip(req)
-	if err != nil {
-		return resp, err
-	}
-
-	if !jsonPattern.MatchString(resp.Header.Get(contentTypeField)) {
-		return resp, nil
-	}
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return resp, err
-	}
-
-	if err = resp.Body.Close(); err != nil {
-		return resp, err
+	if !jsonPattern.MatchString(resp.HeaderMap.Get(contentTypeField)) {
+		return
 	}
 
 	var data map[string]interface{}
-	if err = json.Unmarshal(b, &data); err != nil {
-		return resp, err
+	if err := json.Unmarshal(resp.Body, &data); err != nil {
+		return
 	}
 
 	res := &resource{
-		cacheControl: NewCacheControl(resp),
+		cacheControl: NewCacheControl(&resp),
 		data:         data,
 	}
-	t.embed(req, res, spec)
+	h.embed(r, res, spec)
 
-	delete(resp.Header, expires)
-	resp.Header[cacheControl] = []string{res.cacheControl.String()}
+	delete(resp.HeaderMap, expires)
+	resp.HeaderMap[cacheControl] = []string{res.cacheControl.String()}
 
-	b, err = json.Marshal(res.data)
+	var err error
+	resp.Body, err = json.Marshal(res.data)
 	if err != nil {
-		return resp, err
+		return
 	}
 
-	h := md5.New() // #nosec
-	_, _ = h.Write(b)
-	etag := fmt.Sprintf(`W/"%s"`, hex.EncodeToString(h.Sum(nil)))
-	resp.Header[etagField] = []string{etag}
+	ha := md5.New() // #nosec
+	_, _ = ha.Write(resp.Body)
+	etag := fmt.Sprintf(`W/"%s"`, hex.EncodeToString(ha.Sum(nil)))
+	resp.HeaderMap[etagField] = []string{etag}
 
-	resp.Body = ioutil.NopCloser(bytes.NewReader(b))
-
-	if _, ok := resp.Header[warningField]; !ok {
-		resp.Header.Set(warningField, `214 - "Transformation Applied"`)
+	if _, ok := resp.HeaderMap[warningField]; !ok {
+		resp.HeaderMap.Set(warningField, `214 - "Transformation Applied"`)
 	}
-
-	return resp, nil
 }
 
 type specifier map[string]specifier
@@ -132,7 +119,7 @@ type resource struct {
 	data         interface{}
 }
 
-func (t *Transport) embed(req *http.Request, res *resource, spec specifier) {
+func (h *Handler) embed(req *http.Request, res *resource, spec specifier) {
 	if len(spec) == 0 {
 		return
 	}
@@ -157,14 +144,14 @@ func (t *Transport) embed(req *http.Request, res *resource, spec specifier) {
 		switch l := l.(type) {
 		case map[string]interface{}:
 			count++
-			go t.fetch(req, edge, nil, l[href].(string), next, ch)
+			go h.fetch(req, edge, nil, l[href].(string), next, ch)
 		case []interface{}:
 			es[edge] = make([]interface{}, len(l))
 			for i, l := range l {
 				i := i
 				l := l.(map[string]interface{})
 				count++
-				go t.fetch(req, edge, &i, l[href].(string), next, ch)
+				go h.fetch(req, edge, &i, l[href].(string), next, ch)
 			}
 		}
 	}
@@ -180,12 +167,7 @@ func (t *Transport) embed(req *http.Request, res *resource, spec specifier) {
 	}
 }
 
-func (t *Transport) fetch(base *http.Request, edge string, pos *int, href string, next specifier, ch chan<- *resource) {
-	transport := t.RoundTripper
-	if transport == nil {
-		transport = http.DefaultTransport
-	}
-
+func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, next specifier, ch chan<- *resource) {
 	uri, err := url.Parse(href)
 	if err != nil {
 		ch <- errorResource(edge, pos, NewMalformedURLError(err))
@@ -197,35 +179,23 @@ func (t *Transport) fetch(base *http.Request, edge string, pos *int, href string
 	}
 	req.Header = base.Header
 
-	resp, err := transport.RoundTrip(req)
-	if err != nil {
-		ch <- errorResource(edge, pos, NewRoundTripError(err, uri))
-	}
-	defer func() {
-		if err = resp.Body.Close(); err != nil {
-			log.Fatal(err)
-		}
-	}()
+	var resp common.ResponseBuffer
+	h.Next.ServeHTTP(&resp, req)
 
-	if resp.StatusCode >= http.StatusBadRequest {
-		ch <- errorResource(edge, pos, NewResponseError(resp, uri))
-	}
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		ch <- errorResource(edge, pos, NewResponseBodyReadError(err, uri))
+	if !resp.Successful() {
+		ch <- errorResource(edge, pos, NewResponseError(&resp, uri))
 	}
 
 	var data map[string]interface{}
-	if err := json.Unmarshal(b, &data); err != nil {
+	if err := json.Unmarshal(resp.Body, &data); err != nil {
 		ch <- errorResource(edge, pos, NewMalformedJSONError(err, uri))
 	}
 
 	res := &resource{
-		cacheControl: NewCacheControl(resp),
+		cacheControl: NewCacheControl(&resp),
 		data:         data,
 	}
-	t.embed(req, res, next)
+	h.embed(req, res, next)
 
 	ch <- &resource{
 		edge:         edge,

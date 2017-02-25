@@ -2,6 +2,7 @@ package embed
 
 import (
 	"fmt"
+	"github.com/ichiban/jesi/common"
 	"net/http"
 )
 
@@ -41,37 +42,13 @@ func NewMalformedSubRequestError(err error, uri fmt.Stringer) *Error {
 	}
 }
 
-// NewRoundTripError returns an error for a failed sub request round trip.
-func NewRoundTripError(err error, uri fmt.Stringer) *Error {
-	return &Error{
-		Type:   "https://ichiban.github.io/jesi/problems/round-trip-error",
-		Title:  "Round Trip Error",
-		Detail: err.Error(),
-		Links: map[string]interface{}{
-			about: uri.String(),
-		},
-	}
-}
-
 // NewResponseError returns an error for a non-successful sub request response.
-func NewResponseError(resp *http.Response, uri fmt.Stringer) *Error {
+func NewResponseError(resp *common.ResponseBuffer, uri fmt.Stringer) *Error {
 	return &Error{
 		Type:   "https://ichiban.github.io/jesi/problems/response-error",
 		Title:  "Response Error",
 		Status: resp.StatusCode,
 		Detail: http.StatusText(resp.StatusCode),
-		Links: map[string]interface{}{
-			about: uri.String(),
-		},
-	}
-}
-
-// NewResponseBodyReadError returns an error for a failed response body read.
-func NewResponseBodyReadError(err error, uri fmt.Stringer) *Error {
-	return &Error{
-		Type:   "https://ichiban.github.io/jesi/problems/response-body-read-error",
-		Title:  "Response Body Read Error",
-		Detail: err.Error(),
 		Links: map[string]interface{}{
 			about: uri.String(),
 		},

@@ -4,22 +4,24 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 func TestNewCacheControl(t *testing.T) {
 	testCases := []struct {
-		resp *http.Response
+		resp *common.ResponseBuffer
 		cc   *CacheControl
 	}{
 		{
-			resp: &http.Response{
-				Header: http.Header{},
+			resp: &common.ResponseBuffer{
+				HeaderMap: http.Header{},
 			},
 			cc: &CacheControl{},
 		},
 		{ // If we find Expires, convert it to Cache-Control: max-date.
-			resp: &http.Response{
-				Header: http.Header{
+			resp: &common.ResponseBuffer{
+				HeaderMap: http.Header{
 					"Date":    []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:10 GMT"},
 				},
@@ -32,8 +34,8 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{ // If we can't parse Expires (especially "0"), that means max-age=0.
-			resp: &http.Response{
-				Header: http.Header{
+			resp: &common.ResponseBuffer{
+				HeaderMap: http.Header{
 					"Expires": []string{"0"},
 				},
 			},
@@ -45,8 +47,8 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{
-			resp: &http.Response{
-				Header: http.Header{
+			resp: &common.ResponseBuffer{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{
 						"must-revalidate",
 						"no-cache",
@@ -72,8 +74,8 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{
-			resp: &http.Response{
-				Header: http.Header{
+			resp: &common.ResponseBuffer{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"must-revalidate, no-cache, no-store, public, private, immutable, max-age=123456789"},
 				},
 			},

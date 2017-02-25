@@ -1,13 +1,13 @@
 package embed
 
 import (
-	"io/ioutil"
 	"net/http"
-	"strings"
 	"testing"
+
+	"github.com/ichiban/jesi/common"
 )
 
-func TestTransport_RoundTrip(t *testing.T) {
+func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
 		url       string
 		resources map[string]*testResource
@@ -127,70 +127,58 @@ func TestTransport_RoundTrip(t *testing.T) {
 			t.Errorf("(%d) err is not nil: %v", i, err)
 		}
 
-		tt := &testTransport{
+		th := &testHandler{
 			T:         t,
 			Resources: tc.resources,
 		}
-		e := Transport{tt}
+		e := Handler{Next: th}
 
-		r, err := e.RoundTrip(req)
-		if err != nil {
-			t.Errorf("(%d) err is not nil: %v", i, err)
-		}
+		var resp common.ResponseBuffer
+		e.ServeHTTP(&resp, req)
 
-		if http.StatusOK != r.StatusCode {
-			t.Errorf("(%d) expected 200, got %d, %s", i, r.StatusCode, req.URL)
+		if http.StatusOK != resp.StatusCode {
+			t.Errorf("(%d) expected 200, got %d, %s", i, resp.StatusCode, req.URL)
 		}
 
 		for k, vs := range tc.header {
 			for i, v := range vs {
-				if v != r.Header[k][i] {
-					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, r.Header[k][i])
+				if v != resp.HeaderMap[k][i] {
+					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, resp.HeaderMap[k][i])
 				}
 
 			}
 		}
 
-		body, err := ioutil.ReadAll(r.Body)
-		if err != nil {
-			t.Errorf("(%d) err is not nil: %v", i, err)
-		}
-
-		if tc.body != string(body) {
-			t.Errorf("(%d) expected: %s, got: %s", i, tc.body, string(body))
+		if tc.body != string(resp.Body) {
+			t.Errorf("(%d) expected: %s, got: %s", i, tc.body, string(resp.Body))
 		}
 	}
 }
 
-type testTransport struct {
+type testHandler struct {
 	T         *testing.T
 	Resources map[string]*testResource
 }
 
-var _ http.RoundTripper = (*testTransport)(nil)
+var _ http.Handler = (*testHandler)(nil)
 
-func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.Method != http.MethodGet {
-		t.T.Errorf("method is not GET: %s", req.Method)
+func (h *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		h.T.Errorf("method is not GET: %s", r.Method)
 	}
 
-	resource, ok := t.Resources[req.URL.String()]
+	resource, ok := h.Resources[r.URL.String()]
 	if !ok {
-		resp := &http.Response{
-			StatusCode: http.StatusNotFound,
-			Header:     http.Header{},
-			Body:       ioutil.NopCloser(strings.NewReader("")),
-		}
-		return resp, nil
+		w.WriteHeader(http.StatusNotFound)
+		return
 	}
 
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Header:     resource.header,
-		Body:       ioutil.NopCloser(strings.NewReader(resource.body)),
+	header := w.Header()
+	for k, v := range resource.header {
+		header[k] = v
 	}
-
-	return resp, nil
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(resource.body))
 }
 
 type testResource struct {

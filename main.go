@@ -36,19 +36,18 @@ func main() {
 		log.Fatal(err)
 	}
 
-	handler := httputil.NewSingleHostReverseProxy(uri)
-	handler.Transport = &conditional.Transport{
-		RoundTripper: &embed.Transport{
-			RoundTripper: &cache.Transport{
-				Cache: cache.Cache{
-					Max: max * 1024 * 1024,
+	server := http.Server{
+		Addr: fmt.Sprintf(":%d", port),
+		Handler: &conditional.Handler{
+			Next: &embed.Handler{
+				Next: &cache.Handler{
+					Next: httputil.NewSingleHostReverseProxy(uri),
+					Cache: cache.Cache{
+						Max: max * 1024 * 1024,
+					},
 				},
 			},
 		},
-	}
-	server := http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: handler,
 	}
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)

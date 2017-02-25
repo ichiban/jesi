@@ -1,9 +1,7 @@
 package cache
 
 import (
-	"bytes"
 	"container/list"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -12,14 +10,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 // Cache stores pairs of requests/responses.
 type Cache struct {
 	sync.RWMutex
-	URLVars map[URLKey]*Variations
-	History *list.List
-	Max     uint64
+	URLVars         map[URLKey]*Variations
+	History         *list.List
+	Max             uint64
+	OriginChangedAt time.Time
 }
 
 // Set inserts/updates a new pair of request/response to the cache.
@@ -208,37 +209,86 @@ type CachedResponse struct {
 }
 
 // NewCachedResponse constructs a new cached response.
-func NewCachedResponse(resp *http.Response, reqTime, respTime time.Time) (*CachedResponse, error) {
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	resp.Body = ioutil.NopCloser(bytes.NewReader(body))
-
+func NewCachedResponse(resp *common.ResponseBuffer, reqTime, respTime time.Time) (*CachedResponse, error) {
 	return &CachedResponse{
-		Header:       resp.Header,
-		Body:         body,
+		Header:       resp.HeaderMap,
+		Body:         resp.Body,
 		RequestTime:  reqTime,
 		ResponseTime: respTime,
 	}, nil
 }
 
 // Response converts a cached response to an HTTP response.
-func (e *CachedResponse) Response() *http.Response {
-	h := http.Header{}
-	for k, v := range e.Header {
-		h[k] = v
-	}
-
-	return &http.Response{
+func (e *CachedResponse) Response() *common.ResponseBuffer {
+	return &common.ResponseBuffer{
 		StatusCode: http.StatusOK,
-		Header:     e.Header,
-		Body:       ioutil.NopCloser(bytes.NewReader(e.Body)),
+		HeaderMap:  e.Header,
+		Body:       e.Body,
 	}
 }
 
 type key struct {
 	primary   URLKey
 	secondary VarKey
+}
+
+// CachedState represents freshness of a cached response.
+type CachedState int
+
+const (
+	// Miss means it's not in the cache.
+	Miss CachedState = iota
+
+	// Fresh means it has a cached response and it's available.
+	Fresh
+
+	// Stale means it has a cached response but it's not recommended.
+	Stale
+
+	// Revalidate means it has a cached response but needs confirmation from the backend.
+	Revalidate
+)
+
+// State returns the state of cached response.
+func (c *Cache) State(req *http.Request, cached *CachedResponse) (CachedState, time.Duration) {
+	if cached == nil {
+		return Miss, time.Duration(0)
+	}
+
+	cached.RLock()
+	defer cached.RUnlock()
+
+	if contains(req.Header, pragmaField, noCache) {
+		return Revalidate, time.Duration(0)
+	}
+
+	if contains(req.Header, cacheControlField, noCache) {
+		return Revalidate, time.Duration(0)
+	}
+
+	if contains(cached.Header, cacheControlField, noCache) {
+		return Revalidate, time.Duration(0)
+	}
+
+	if lifetime, ok := freshnessLifetime(cached); ok {
+		age := currentAge(cached)
+
+		// cached responses before the last destructive requests (e.g. POST) are considered outdated.
+		if time.Since(c.OriginChangedAt) <= age {
+			return Revalidate, time.Duration(0)
+		}
+
+		delta := age - lifetime
+		if lifetime > age {
+			return Fresh, delta
+		}
+
+		if contains(cached.Header, cacheControlField, revalidatePattern) {
+			return Revalidate, time.Duration(0)
+		}
+
+		return Stale, delta
+	}
+
+	return Revalidate, time.Duration(0)
 }

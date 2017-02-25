@@ -2,12 +2,15 @@ package cache
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ichiban/jesi/common"
 )
 
 const (
@@ -38,77 +41,82 @@ var (
 	maxStalePattern = regexp.MustCompile(`\Amax-stale=(\d+)\z`)
 )
 
-// Transport is a caching round tripper.
-type Transport struct {
-	http.RoundTripper
+// Handler is a caching handler.
+type Handler struct {
+	Next http.Handler
 	Cache
-	OriginChangedAt time.Time
 }
 
-var _ http.RoundTripper = (*Transport)(nil)
+var _ http.Handler = (*Handler)(nil)
 
-// RoundTrip returns a cached response if found. Otherwise, retrieve one from the underlying transport.
-func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.init()
+// ServeHTTP returns a cached response if found. Otherwise, retrieves one from the underlying handler.
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	cached := h.Get(r)
+	state, delta := h.State(r, cached)
 
-	cached := t.Get(req)
-	if cached != nil {
-		cached.RLock()
-		defer cached.RUnlock()
-	}
-
-	state, delta := t.State(req, cached)
 	switch state {
 	case Fresh:
-		log.Printf("fresh: %s", req.URL)
-		return cached.Response(), nil
+		log.Printf("fresh: %s", r.URL)
+		serveFresh(w, cached)
+		return
 	case Stale:
 		if maxStale(cached) < delta {
 			break
 		}
 
-		log.Printf("stale: %s", req.URL)
-		return staleResponse(cached), nil
+		log.Printf("stale: %s", r.URL)
+		serveStale(w, cached)
+		return
 	case Revalidate:
-		log.Printf("revalidate: %s", req.URL)
-		req = revalidateRequest(req, cached)
+		log.Printf("revalidate: %s", r.URL)
+		r = revalidateRequest(r, cached)
 	}
 
+	var resp common.ResponseBuffer
 	reqTime := time.Now()
-	resp, err := t.RoundTripper.RoundTrip(req)
+	h.Next.ServeHTTP(&resp, r)
 	respTime := time.Now()
-	if err != nil {
-		if state == Stale {
-			log.Printf("stale: %s", req.URL)
-			return staleResponse(cached), nil
+	defer func() {
+		if _, err := resp.WriteTo(w); err != nil {
+			log.Print(err)
 		}
+	}()
 
-		return resp, err
-	}
-
-	if originChanged(req, resp) {
-		t.OriginChangedAt = respTime
-	}
-
-	if revalidated(state, resp) {
-		log.Printf("validated: %s", req.URL)
-		resp = revalidatedResponse(resp, cached)
-	}
-
-	t.cacheIfPossible(req, resp, reqTime, respTime)
-
-	return resp, nil
-}
-
-func (t *Transport) init() {
-	if t.RoundTripper != nil {
+	if !resp.Successful() {
+		if state == Stale {
+			log.Printf("stale: %s", r.URL)
+			resp = *staleResponse(cached)
+		}
 		return
 	}
 
-	t.RoundTripper = http.DefaultTransport
+	if originChanged(r, &resp) {
+		h.OriginChangedAt = respTime
+	}
+
+	if revalidated(state, &resp) {
+		log.Printf("validated: %s", r.URL)
+		resp = *revalidatedResponse(&resp, cached)
+	}
+
+	h.cacheIfPossible(r, &resp, reqTime, respTime)
 }
 
-func originChanged(req *http.Request, resp *http.Response) bool {
+func serveFresh(w io.Writer, cached *CachedResponse) {
+	resp := cached.Response()
+	if _, err := resp.WriteTo(w); err != nil {
+		log.Print(err)
+	}
+}
+
+func serveStale(w io.Writer, cached *CachedResponse) {
+	resp := staleResponse(cached)
+	if _, err := resp.WriteTo(w); err != nil {
+		log.Print(err)
+	}
+}
+
+func originChanged(req *http.Request, resp *common.ResponseBuffer) bool {
 	return !idempotent(req) && successful(resp)
 }
 
@@ -116,7 +124,7 @@ func idempotent(req *http.Request) bool {
 	return req.Method == http.MethodGet || req.Method == http.MethodHead
 }
 
-func successful(resp *http.Response) bool {
+func successful(resp *common.ResponseBuffer) bool {
 	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
 }
 
@@ -142,38 +150,38 @@ func revalidateRequest(orig *http.Request, cached *CachedResponse) *http.Request
 	return req
 }
 
-func staleResponse(cached *CachedResponse) *http.Response {
+func staleResponse(cached *CachedResponse) *common.ResponseBuffer {
 	resp := cached.Response()
-	resp.Header.Set(warningField, `110 - "Response is Stale"`)
+	resp.HeaderMap.Set(warningField, `110 - "Response is Stale"`)
 	return resp
 }
 
-func revalidatedResponse(resp *http.Response, cached *CachedResponse) *http.Response {
+func revalidatedResponse(resp *common.ResponseBuffer, cached *CachedResponse) *common.ResponseBuffer {
 	result := cached.Response()
 
 	var warnings []string
-	for _, warning := range values(result.Header, warningField) {
+	for _, warning := range values(result.HeaderMap, warningField) {
 		if strings.HasPrefix(warning, "2") {
 			warnings = append(warnings, warning)
 		}
 	}
-	result.Header[warningField] = warnings
+	result.HeaderMap[warningField] = warnings
 
-	for k, v := range resp.Header {
+	for k, v := range resp.HeaderMap {
 		if k == warningField {
 			continue
 		}
-		result.Header[k] = v
+		result.HeaderMap[k] = v
 	}
 
 	return result
 }
 
-func revalidated(state CachedState, resp *http.Response) bool {
+func revalidated(state CachedState, resp *common.ResponseBuffer) bool {
 	return state == Revalidate && resp.StatusCode == http.StatusNotModified
 }
 
-func (t *Transport) cacheIfPossible(req *http.Request, resp *http.Response, reqTime, respTime time.Time) {
+func (h *Handler) cacheIfPossible(req *http.Request, resp *common.ResponseBuffer, reqTime, respTime time.Time) {
 	if !Cacheable(req, resp) {
 		return
 	}
@@ -182,65 +190,7 @@ func (t *Transport) cacheIfPossible(req *http.Request, resp *http.Response, reqT
 	if err != nil {
 		log.Fatal(err)
 	}
-	t.Set(req, cached)
-}
-
-// CachedState represents freshness of a cached response.
-type CachedState int
-
-const (
-	// Miss means it's not in the cache.
-	Miss CachedState = iota
-
-	// Fresh means it has a cached response and it's available.
-	Fresh
-
-	// Stale means it has a cached response but it's not recommended.
-	Stale
-
-	// Revalidate means it has a cached response but needs confirmation from the backend.
-	Revalidate
-)
-
-// State returns the state of cached response.
-func (t *Transport) State(req *http.Request, cached *CachedResponse) (CachedState, time.Duration) {
-	if cached == nil {
-		return Miss, time.Duration(0)
-	}
-
-	if contains(req.Header, pragmaField, noCache) {
-		return Revalidate, time.Duration(0)
-	}
-
-	if contains(req.Header, cacheControlField, noCache) {
-		return Revalidate, time.Duration(0)
-	}
-
-	if contains(cached.Header, cacheControlField, noCache) {
-		return Revalidate, time.Duration(0)
-	}
-
-	if lifetime, ok := freshnessLifetime(cached); ok {
-		age := currentAge(cached)
-
-		// cached responses before the last destructive requests (e.g. POST) are considered outdated.
-		if time.Since(t.OriginChangedAt) <= age {
-			return Revalidate, time.Duration(0)
-		}
-
-		delta := age - lifetime
-		if lifetime > age {
-			return Fresh, delta
-		}
-
-		if contains(cached.Header, cacheControlField, revalidatePattern) {
-			return Revalidate, time.Duration(0)
-		}
-
-		return Stale, delta
-	}
-
-	return Revalidate, time.Duration(0)
+	h.Set(req, cached)
 }
 
 func freshnessLifetime(cached *CachedResponse) (time.Duration, bool) {
@@ -407,7 +357,7 @@ func responseDelay(cached *CachedResponse) time.Duration {
 }
 
 // Cacheable checks if the req/resp pair is cacheable based on https://tools.ietf.org/html/rfc7234#section-3
-func Cacheable(req *http.Request, resp *http.Response) bool {
+func Cacheable(req *http.Request, resp *common.ResponseBuffer) bool {
 	if req.Method != http.MethodGet {
 		return false
 	}
@@ -420,21 +370,21 @@ func Cacheable(req *http.Request, resp *http.Response) bool {
 		return false
 	}
 
-	if contains(resp.Header, cacheControlField, noCacheOrPrivate) {
+	if contains(resp.HeaderMap, cacheControlField, noCacheOrPrivate) {
 		return false
 	}
 
 	if _, ok := req.Header[authorizationField]; ok {
-		if !contains(resp.Header, cacheControlField, mustRevalidateOrPublicOrSMaxage) {
+		if !contains(resp.HeaderMap, cacheControlField, mustRevalidateOrPublicOrSMaxage) {
 			return false
 		}
 	}
 
-	if _, ok := resp.Header[expiresField]; ok {
+	if _, ok := resp.HeaderMap[expiresField]; ok {
 		return true
 	}
 
-	if contains(resp.Header, cacheControlField, maxAgeOrSMaxageOrPublic) {
+	if contains(resp.HeaderMap, cacheControlField, maxAgeOrSMaxageOrPublic) {
 		return true
 	}
 

@@ -173,12 +173,13 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		ch <- errorResource(edge, pos, NewMalformedURLError(err))
 	}
 
-	req, err := http.NewRequest(http.MethodGet, base.URL.ResolveReference(uri).String(), nil)
+	log.Printf("fetch: %s", uri)
+
+	req, err := http.NewRequest(http.MethodGet, uri.String(), nil)
 	if err != nil {
 		ch <- errorResource(edge, pos, NewMalformedSubRequestError(err, uri))
 	}
 	req.Header = base.Header
-
 	var resp common.ResponseBuffer
 	h.Next.ServeHTTP(&resp, req)
 

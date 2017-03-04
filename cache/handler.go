@@ -51,6 +51,8 @@ var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns a cached response if found. Otherwise, retrieves one from the underlying handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("cache serve: %s", r.URL)
+
 	cached := h.Get(r)
 	state, delta := h.State(r, cached)
 
@@ -71,6 +73,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("revalidate: %s", r.URL)
 		r = revalidateRequest(r, cached)
 	}
+
+	origReq := *r
+	origURL := *r.URL
+	log.Printf("origURL: %s", origURL.String())
+	origReq.URL = &origURL
 
 	var resp common.ResponseBuffer
 	reqTime := time.Now()
@@ -99,7 +106,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp = *revalidatedResponse(&resp, cached)
 	}
 
-	h.cacheIfPossible(r, &resp, reqTime, respTime)
+	h.cacheIfPossible(&origReq, &resp, reqTime, respTime)
 }
 
 func serveFresh(w io.Writer, cached *CachedResponse) {

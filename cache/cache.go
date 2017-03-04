@@ -31,6 +31,8 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	defer c.Unlock()
 
 	urlKey := NewURLKey(req)
+	log.Printf("set: %#v", urlKey)
+
 	variations, ok := c.URLVars[urlKey]
 	if !ok {
 		variations = NewVariations(cached)

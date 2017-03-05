@@ -18,7 +18,7 @@ func main() {
 	log.Printf("version: %s", version)
 
 	var port int
-	var backends balance.Backends
+	var backends balance.BackendPool
 	var max uint64
 
 	flag.IntVar(&port, "port", 8080, "port number")
@@ -30,13 +30,15 @@ func main() {
 	log.Printf("backend: %s", &backends)
 	log.Printf("max: %d", max)
 
+	go backends.Run()
+
 	server := http.Server{
 		Addr: fmt.Sprintf(":%d", port),
 		Handler: &conditional.Handler{
 			Next: &embed.Handler{
 				Next: &cache.Handler{
 					Next: &balance.Handler{
-						Backends: &backends,
+						BackendPool: &backends,
 					},
 					Cache: cache.Cache{
 						Max: max * 1024 * 1024,

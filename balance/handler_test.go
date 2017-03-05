@@ -11,36 +11,37 @@ import (
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
-		backends Backends
+		backends []*Backend
 		numReqs  int
 
 		directed []url.URL
 	}{
 		{
-			backends: Backends{
-				All: []Backend{
-					{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
-					{URL: &url.URL{Scheme: "https", Host: "b.example.com"}},
-					{URL: &url.URL{Scheme: "https", Host: "c.example.com"}},
-				},
+			backends: []*Backend{
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
+				{URL: &url.URL{Scheme: "https", Host: "p.example.com"}},
+				{URL: &url.URL{Scheme: "https", Host: "c.example.com"}},
 			},
 			numReqs: 6,
 
 			directed: []url.URL{
 				{Scheme: "https", Host: "a.example.com"},
-				{Scheme: "https", Host: "b.example.com"},
+				{Scheme: "https", Host: "p.example.com"},
 				{Scheme: "https", Host: "c.example.com"},
 				{Scheme: "https", Host: "a.example.com"},
-				{Scheme: "https", Host: "b.example.com"},
+				{Scheme: "https", Host: "p.example.com"},
 				{Scheme: "https", Host: "c.example.com"},
 			},
 		},
 	}
 
 	for i, tc := range testCases {
-		h := Handler{
-			Backends: &tc.backends,
+		var p BackendPool
+		for _, b := range tc.backends {
+			p.Add(b)
 		}
+
+		h := Handler{BackendPool: &p}
 
 		rt := testRoundTripper{}
 

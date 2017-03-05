@@ -134,6 +134,8 @@ func (h *Handler) embed(req *http.Request, res *resource, spec specifier) {
 	}
 
 	ch := make(chan *resource, len(spec))
+	defer close(ch)
+
 	count := 0
 	for edge, next := range spec {
 		l, ok := ls[edge]
@@ -171,11 +173,13 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 	uri, err := url.Parse(href)
 	if err != nil {
 		ch <- errorResource(edge, pos, NewMalformedURLError(err))
+		return
 	}
 
 	req, err := http.NewRequest(http.MethodGet, base.URL.ResolveReference(uri).String(), nil)
 	if err != nil {
 		ch <- errorResource(edge, pos, NewMalformedSubRequestError(err, uri))
+		return
 	}
 	req.Header = base.Header
 
@@ -184,11 +188,13 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 
 	if !resp.Successful() {
 		ch <- errorResource(edge, pos, NewResponseError(&resp, uri))
+		return
 	}
 
 	var data map[string]interface{}
 	if err := json.Unmarshal(resp.Body, &data); err != nil {
 		ch <- errorResource(edge, pos, NewMalformedJSONError(err, uri))
+		return
 	}
 
 	res := &resource{

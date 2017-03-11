@@ -24,6 +24,8 @@ var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns NotModified if ETag matches.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("conditional req: %s", r.URL)
+
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		h.Next.ServeHTTP(w, r)
 		return

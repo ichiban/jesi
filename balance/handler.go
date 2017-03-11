@@ -34,7 +34,6 @@ func (h *Handler) direct(r *http.Request) {
 	b := h.BackendPool.Next()
 
 	if b == nil {
-		// TODO: cancel r
 		return
 	}
 
@@ -88,6 +87,7 @@ func (s State) String() string {
 type Backend struct {
 	*list.Element
 	*url.URL
+	http.Client
 
 	State    State
 	Interval time.Duration
@@ -118,7 +118,7 @@ func (b *Backend) Run(ch chan<- *Backend) {
 func (b *Backend) Probe() {
 	var healthy bool
 
-	resp, err := http.Get(b.URL.String())
+	resp, err := b.Get(b.URL.String())
 	if err == nil {
 		healthy = 200 <= resp.StatusCode && resp.StatusCode < 400
 	}

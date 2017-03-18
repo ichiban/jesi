@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -215,6 +216,109 @@ func TestBackend_Probe(t *testing.T) {
 			t.Errorf("expected: %s, got: %s", tc.state, tc.backend.State)
 		}
 
+	}
+}
+
+func TestBackend_Run(t *testing.T) {
+	testCases := []struct {
+		backend  Backend
+		statuses []int
+	}{
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: StillHealthy,
+			},
+			statuses: []int{
+				http.StatusInternalServerError,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: StillHealthy,
+			},
+			statuses: []int{
+				http.StatusOK,
+				http.StatusInternalServerError,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: StillSick,
+			},
+			statuses: []int{
+				http.StatusOK,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: StillSick,
+			},
+			statuses: []int{
+				http.StatusInternalServerError,
+				http.StatusOK,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: BackHealthy,
+			},
+			statuses: []int{
+				http.StatusOK,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: BackHealthy,
+			},
+			statuses: []int{
+				http.StatusInternalServerError,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: WentSick,
+			},
+			statuses: []int{
+				http.StatusOK,
+			},
+		},
+		{
+			backend: Backend{
+				URL:   &url.URL{Path: "/foo"},
+				State: WentSick,
+			},
+			statuses: []int{
+				http.StatusInternalServerError,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		transport := testRoundTripper{
+			statuses: tc.statuses,
+		}
+		tc.backend.Interval = time.Nanosecond
+		tc.backend.Transport = &transport
+
+		ch := make(chan *Backend)
+		quit := make(chan struct{})
+
+		go tc.backend.Run(ch, quit)
+
+		<-ch
+
+		if len(tc.statuses) != len(transport.urls) {
+			t.Errorf("expedted: %d, got: %d", len(tc.statuses), len(transport.urls))
+		}
+
+		quit <- struct{}{}
 	}
 }
 

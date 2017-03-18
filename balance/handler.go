@@ -99,18 +99,25 @@ func (b *Backend) String() string {
 
 // Run keeps probing the backend to keep its state updated.
 // When state changed, it notifies ch.
-func (b *Backend) Run(ch chan<- *Backend) {
+func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 	if b.Interval == 0 {
 		b.Interval = 10 * time.Second
 	}
 
-	for range time.After(b.Interval) {
-		old := b.State
-		b.Probe()
-		if old == b.State {
-			continue
+	b.Client.Timeout = 10 * time.Second
+
+	for {
+		select {
+		case <-time.After(b.Interval):
+			old := b.State
+			b.Probe()
+			if old == b.State {
+				continue
+			}
+			ch <- b
+		case <-quit:
+			return
 		}
-		ch <- b
 	}
 }
 
@@ -193,7 +200,7 @@ func (p *BackendPool) Add(b *Backend) {
 	}
 
 	if p.Changed != nil {
-		go b.Run(p.Changed)
+		go b.Run(p.Changed, nil)
 	}
 }
 
@@ -223,7 +230,7 @@ func (p *BackendPool) Run() {
 
 	for e := p.Healthy.Front(); e != nil; e = e.Next() {
 		b := e.Value.(*Backend)
-		go b.Run(p.Changed)
+		go b.Run(p.Changed, nil)
 	}
 
 	for b := range p.Changed {

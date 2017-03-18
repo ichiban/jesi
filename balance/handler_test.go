@@ -91,119 +91,56 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	}
 }
 
-func TestState_String(t *testing.T) {
-	testCases := []struct {
-		state State
-		str   string
-	}{
-		{state: StillHealthy, str: "StillHealthy"},
-		{state: StillSick, str: "StillSick"},
-		{state: BackHealthy, str: "BackHealthy"},
-		{state: WentSick, str: "WentSick"},
-		{state: -1, str: "Unknown"},
-	}
-
-	for _, tc := range testCases {
-		if tc.str != tc.state.String() {
-			t.Errorf("expected: %s, got: %s", tc.str, tc.state.String())
-		}
-	}
-}
-
 func TestBackend_Probe(t *testing.T) {
 	testCases := []struct {
 		backend  Backend
 		statuses []int
 
-		state State
+		sick bool
 	}{
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillHealthy,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: false,
 			},
 			statuses: []int{
 				http.StatusOK,
 			},
 
-			state: StillHealthy,
+			sick: false,
 		},
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillHealthy,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: false,
 			},
 			statuses: []int{
 				http.StatusInternalServerError,
 			},
 
-			state: WentSick,
+			sick: true,
 		},
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillSick,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: true,
+			},
+			statuses: []int{
+				http.StatusInternalServerError,
+			},
+
+			sick: true,
+		},
+		{
+			backend: Backend{
+				URL:  &url.URL{Path: "/foo"},
+				Sick: true,
 			},
 			statuses: []int{
 				http.StatusOK,
 			},
 
-			state: BackHealthy,
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillSick,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-
-			state: StillSick,
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: BackHealthy,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-
-			state: StillHealthy,
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: BackHealthy,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-
-			state: WentSick,
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: WentSick,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-
-			state: BackHealthy,
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: WentSick,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-
-			state: StillSick,
+			sick: false,
 		},
 	}
 
@@ -212,8 +149,8 @@ func TestBackend_Probe(t *testing.T) {
 			statuses: tc.statuses,
 		}
 		tc.backend.Probe()
-		if tc.state != tc.backend.State {
-			t.Errorf("expected: %s, got: %s", tc.state, tc.backend.State)
+		if tc.sick != tc.backend.Sick {
+			t.Errorf("expected: %t, got: %t", tc.sick, tc.backend.Sick)
 		}
 
 	}
@@ -226,8 +163,8 @@ func TestBackend_Run(t *testing.T) {
 	}{
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillHealthy,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: false,
 			},
 			statuses: []int{
 				http.StatusInternalServerError,
@@ -235,8 +172,8 @@ func TestBackend_Run(t *testing.T) {
 		},
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillHealthy,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: false,
 			},
 			statuses: []int{
 				http.StatusOK,
@@ -245,8 +182,8 @@ func TestBackend_Run(t *testing.T) {
 		},
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillSick,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: true,
 			},
 			statuses: []int{
 				http.StatusOK,
@@ -254,48 +191,12 @@ func TestBackend_Run(t *testing.T) {
 		},
 		{
 			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: StillSick,
+				URL:  &url.URL{Path: "/foo"},
+				Sick: true,
 			},
 			statuses: []int{
 				http.StatusInternalServerError,
 				http.StatusOK,
-			},
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: BackHealthy,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: BackHealthy,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: WentSick,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-		},
-		{
-			backend: Backend{
-				URL:   &url.URL{Path: "/foo"},
-				State: WentSick,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
 			},
 		},
 	}

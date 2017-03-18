@@ -54,42 +54,13 @@ func (h *Handler) direct(r *http.Request) {
 	}
 }
 
-// State is a backend status.
-type State int
-
-const (
-	// StillHealthy means the backend is OK to serve responses.
-	StillHealthy State = iota
-	// StillSick means the backend is NG to serve responses.
-	StillSick
-	// BackHealthy means the backend has turned to OK to serve responses.
-	BackHealthy
-	// WentSick means the backend has turned to NG to serve responses.
-	WentSick
-)
-
-func (s State) String() string {
-	switch s {
-	case StillHealthy:
-		return "StillHealthy"
-	case StillSick:
-		return "StillSick"
-	case BackHealthy:
-		return "BackHealthy"
-	case WentSick:
-		return "WentSick"
-	default:
-		return "Unknown"
-	}
-}
-
 // Backend represents an upstream server.
 type Backend struct {
 	*list.Element
 	*url.URL
 	http.Client
 
-	State    State
+	Sick     bool
 	Interval time.Duration
 }
 
@@ -109,9 +80,9 @@ func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 	for {
 		select {
 		case <-time.After(b.Interval):
-			old := b.State
+			old := b.Sick
 			b.Probe()
-			if old == b.State {
+			if old == b.Sick {
 				continue
 			}
 			ch <- b
@@ -123,27 +94,13 @@ func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 
 // Probe makes a probing request to the background and changes its internal state accordingly.
 func (b *Backend) Probe() {
-	var healthy bool
-
 	resp, err := b.Get(b.URL.String())
-	if err == nil {
-		healthy = 200 <= resp.StatusCode && resp.StatusCode < 400
+	if err != nil {
+		b.Sick = true
+		return
 	}
 
-	switch b.State {
-	case StillHealthy, BackHealthy:
-		if healthy {
-			b.State = StillHealthy
-		} else {
-			b.State = WentSick
-		}
-	case StillSick, WentSick:
-		if healthy {
-			b.State = BackHealthy
-		} else {
-			b.State = StillSick
-		}
-	}
+	b.Sick = resp.StatusCode >= 400
 }
 
 // BackendPool hold a set of backends.
@@ -192,11 +149,10 @@ func (p *BackendPool) Add(b *Backend) {
 	p.Lock()
 	defer p.Unlock()
 
-	switch b.State {
-	case StillHealthy, BackHealthy:
-		b.Element = p.Healthy.PushBack(b)
-	case StillSick, WentSick:
+	if b.Sick {
 		b.Element = p.Sick.PushBack(b)
+	} else {
+		b.Element = p.Healthy.PushBack(b)
 	}
 
 	if p.Changed != nil {
@@ -234,16 +190,15 @@ func (p *BackendPool) Run() {
 	}
 
 	for b := range p.Changed {
-		log.Printf("backend: %s, state: %s", b, b.State)
+		log.Printf("backend: %s, sick: %s", b, b.Sick)
 
-		switch b.State {
-		case BackHealthy:
-			p.Lock()
-			b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
-			p.Unlock()
-		case WentSick:
+		if b.Sick {
 			p.Lock()
 			b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
+			p.Unlock()
+		} else {
+			p.Lock()
+			b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
 			p.Unlock()
 		}
 

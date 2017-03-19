@@ -54,42 +54,13 @@ func (h *Handler) direct(r *http.Request) {
 	}
 }
 
-// State is a backend status.
-type State int
-
-const (
-	// StillHealthy means the backend is OK to serve responses.
-	StillHealthy State = iota
-	// StillSick means the backend is NG to serve responses.
-	StillSick
-	// BackHealthy means the backend has turned to OK to serve responses.
-	BackHealthy
-	// WentSick means the backend has turned to NG to serve responses.
-	WentSick
-)
-
-func (s State) String() string {
-	switch s {
-	case StillHealthy:
-		return "StillHealthy"
-	case StillSick:
-		return "StillSick"
-	case BackHealthy:
-		return "BackHealthy"
-	case WentSick:
-		return "WentSick"
-	default:
-		return "Unknown"
-	}
-}
-
 // Backend represents an upstream server.
 type Backend struct {
 	*list.Element
 	*url.URL
 	http.Client
 
-	State    State
+	Sick     bool
 	Interval time.Duration
 }
 
@@ -99,44 +70,41 @@ func (b *Backend) String() string {
 
 // Run keeps probing the backend to keep its state updated.
 // When state changed, it notifies ch.
-func (b *Backend) Run(ch chan<- *Backend) {
+func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
+	defer log.Printf("done: %s", b)
+
 	if b.Interval == 0 {
 		b.Interval = 10 * time.Second
 	}
 
-	for range time.After(b.Interval) {
-		old := b.State
-		b.Probe()
-		if old == b.State {
-			continue
+	b.Client.Timeout = 10 * time.Second
+
+	for {
+		select {
+		case <-time.After(b.Interval):
+			old := b.Sick
+			b.Probe()
+			if old != b.Sick {
+				ch <- b
+			}
+		case <-quit:
+			return
 		}
-		ch <- b
 	}
 }
 
 // Probe makes a probing request to the background and changes its internal state accordingly.
 func (b *Backend) Probe() {
-	var healthy bool
+	log.Printf("probe: %s", b)
+	defer log.Printf("probe: %s, sick: %t", b, b.Sick)
 
 	resp, err := b.Get(b.URL.String())
-	if err == nil {
-		healthy = 200 <= resp.StatusCode && resp.StatusCode < 400
+	if err != nil {
+		b.Sick = true
+		return
 	}
 
-	switch b.State {
-	case StillHealthy, BackHealthy:
-		if healthy {
-			b.State = StillHealthy
-		} else {
-			b.State = WentSick
-		}
-	case StillSick, WentSick:
-		if healthy {
-			b.State = BackHealthy
-		} else {
-			b.State = StillSick
-		}
-	}
+	b.Sick = resp.StatusCode >= 400
 }
 
 // BackendPool hold a set of backends.
@@ -144,6 +112,8 @@ type BackendPool struct {
 	sync.RWMutex
 
 	Changed chan *Backend
+	Moved   chan struct{}
+	Quit    chan struct{}
 	Healthy list.List
 	Sick    list.List
 }
@@ -185,16 +155,18 @@ func (p *BackendPool) Add(b *Backend) {
 	p.Lock()
 	defer p.Unlock()
 
-	switch b.State {
-	case StillHealthy, BackHealthy:
-		b.Element = p.Healthy.PushBack(b)
-	case StillSick, WentSick:
+	if b.Sick {
 		b.Element = p.Sick.PushBack(b)
+	} else {
+		b.Element = p.Healthy.PushBack(b)
 	}
 
-	if p.Changed != nil {
-		go b.Run(p.Changed)
+	// BackendPool is not running yet. So it's not now to run the backend probing.
+	if p.Changed == nil || p.Quit == nil {
+		return
 	}
+
+	go b.Run(p.Changed, p.Quit)
 }
 
 // Next picks one of the backends and returns.
@@ -214,32 +186,45 @@ func (p *BackendPool) Next() *Backend {
 }
 
 // Run keeps watching changes of the backends' states to keep Healthy/Sick queues updated.
-func (p *BackendPool) Run() {
-	if p.Changed != nil { // already running
-		return
+func (p *BackendPool) Run(quit <-chan struct{}) {
+	if p.Changed == nil {
+		p.Changed = make(chan *Backend)
 	}
 
-	p.Changed = make(chan *Backend)
+	if p.Quit == nil {
+		p.Quit = make(chan struct{})
+	}
 
 	for e := p.Healthy.Front(); e != nil; e = e.Next() {
 		b := e.Value.(*Backend)
-		go b.Run(p.Changed)
+		go b.Run(p.Changed, p.Quit)
 	}
 
-	for b := range p.Changed {
-		log.Printf("backend: %s, state: %s", b, b.State)
+	if p.Moved != nil {
+		p.Moved <- struct{}{}
+	}
 
-		switch b.State {
-		case BackHealthy:
+	for {
+		select {
+		case b := <-p.Changed:
+			log.Printf("backend: %s, sick: %t", b, b.Sick)
+
 			p.Lock()
-			b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
+			if b.Sick {
+				b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
+			} else {
+				b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
+			}
 			p.Unlock()
-		case WentSick:
-			p.Lock()
-			b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
-			p.Unlock()
+
+			if p.Moved != nil {
+				p.Moved <- struct{}{}
+			}
+
+			log.Printf("backend pool: %s", p)
+		case <-quit:
+			close(p.Quit)
+			return
 		}
-
-		log.Printf("backend pool: %s", p)
 	}
 }

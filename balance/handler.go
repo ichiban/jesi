@@ -108,6 +108,8 @@ type BackendPool struct {
 	sync.RWMutex
 
 	Changed chan *Backend
+	Moved   chan *Backend
+	Quit    chan struct{}
 	Healthy list.List
 	Sick    list.List
 }
@@ -148,6 +150,7 @@ func (p *BackendPool) Set(str string) error {
 func (p *BackendPool) Add(b *Backend) {
 	p.Lock()
 	defer p.Unlock()
+	p.init()
 
 	if b.Sick {
 		b.Element = p.Sick.PushBack(b)
@@ -155,9 +158,7 @@ func (p *BackendPool) Add(b *Backend) {
 		b.Element = p.Healthy.PushBack(b)
 	}
 
-	if p.Changed != nil {
-		go b.Run(p.Changed, nil)
-	}
+	go b.Run(p.Changed, p.Quit)
 }
 
 // Next picks one of the backends and returns.
@@ -177,31 +178,43 @@ func (p *BackendPool) Next() *Backend {
 }
 
 // Run keeps watching changes of the backends' states to keep Healthy/Sick queues updated.
-func (p *BackendPool) Run() {
-	if p.Changed != nil { // already running
-		return
-	}
-
-	p.Changed = make(chan *Backend)
+func (p *BackendPool) Run(quit <-chan struct{}) {
+	p.init()
 
 	for e := p.Healthy.Front(); e != nil; e = e.Next() {
 		b := e.Value.(*Backend)
-		go b.Run(p.Changed, nil)
+		go b.Run(p.Changed, p.Quit)
 	}
 
-	for b := range p.Changed {
-		log.Printf("backend: %s, sick: %s", b, b.Sick)
+	for {
+		select {
+		case b := <-p.Changed:
+			log.Printf("backend: %s, sick: %t", b, b.Sick)
 
-		if b.Sick {
 			p.Lock()
-			b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
+			if b.Sick {
+				b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
+			} else {
+				b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
+			}
 			p.Unlock()
-		} else {
-			p.Lock()
-			b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
-			p.Unlock()
+
+			p.Moved <- b
+
+			log.Printf("backend pool: %s", p)
+		case <-quit:
+			close(p.Quit)
+			return
 		}
+	}
+}
 
-		log.Printf("backend pool: %s", p)
+func (p *BackendPool) init() {
+	if p.Changed == nil {
+		p.Changed = make(chan *Backend)
+	}
+
+	if p.Quit == nil {
+		p.Quit = make(chan struct{})
 	}
 }

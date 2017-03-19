@@ -30,7 +30,7 @@ func main() {
 	log.Printf("backend: %s", &backends)
 	log.Printf("max: %d", max)
 
-	go backends.Run()
+	go backends.Run(nil)
 
 	server := http.Server{
 		Addr: fmt.Sprintf(":%d", port),

@@ -71,6 +71,8 @@ func (b *Backend) String() string {
 // Run keeps probing the backend to keep its state updated.
 // When state changed, it notifies ch.
 func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
+	defer log.Printf("done: %s", b)
+
 	if b.Interval == 0 {
 		b.Interval = 10 * time.Second
 	}
@@ -89,7 +91,6 @@ func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 			return
 		}
 	}
-	log.Printf("done: %s", b)
 }
 
 // Probe makes a probing request to the background and changes its internal state accordingly.

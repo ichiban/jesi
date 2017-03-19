@@ -216,12 +216,11 @@ func TestBackend_Run(t *testing.T) {
 		go tc.backend.Run(ch, quit)
 
 		<-ch
+		close(quit)
 
 		if len(tc.statuses) != len(transport.urls) {
 			t.Errorf("expedted: %d, got: %d", len(tc.statuses), len(transport.urls))
 		}
-
-		quit <- struct{}{}
 	}
 }
 
@@ -238,7 +237,6 @@ func TestBackendPool_Set(t *testing.T) {
 
 	for _, tc := range testCases {
 		tc.p.Set(tc.b)
-		tc.p.Quit <- struct{}{}
 
 		var found bool
 		for e := tc.p.Healthy.Front(); e != nil; e.Next() {
@@ -285,7 +283,6 @@ func TestBackendPool_Add(t *testing.T) {
 
 	for _, tc := range testCases {
 		tc.p.Add(&tc.b)
-		tc.p.Quit <- struct{}{}
 
 		var l *list.List
 		if tc.sick {
@@ -414,21 +411,23 @@ func TestBackendPool_Run(t *testing.T) {
 	for i, tc := range testCases {
 		var p BackendPool
 
-		p.Moved = make(chan *Backend)
+		p.Moved = make(chan struct{})
 
 		for _, b := range tc.beforeHealthy {
 			b.Sick = false
 			p.Add(b)
 		}
 
+		q := make(chan struct{})
+
+		go p.Run(q)
+
 		for _, b := range tc.beforeSick {
 			b.Sick = true
 			p.Add(b)
 		}
 
-		q := make(chan struct{})
-
-		go p.Run(q)
+		<-p.Moved
 
 		// fake probings
 		for _, b := range tc.change {

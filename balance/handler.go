@@ -82,18 +82,21 @@ func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 		case <-time.After(b.Interval):
 			old := b.Sick
 			b.Probe()
-			if old == b.Sick {
-				continue
+			if old != b.Sick {
+				ch <- b
 			}
-			ch <- b
 		case <-quit:
 			return
 		}
 	}
+	log.Printf("done: %s", b)
 }
 
 // Probe makes a probing request to the background and changes its internal state accordingly.
 func (b *Backend) Probe() {
+	log.Printf("probe: %s", b)
+	defer log.Printf("probe: %s, sick: %t", b, b.Sick)
+
 	resp, err := b.Get(b.URL.String())
 	if err != nil {
 		b.Sick = true
@@ -108,7 +111,7 @@ type BackendPool struct {
 	sync.RWMutex
 
 	Changed chan *Backend
-	Moved   chan *Backend
+	Moved   chan struct{}
 	Quit    chan struct{}
 	Healthy list.List
 	Sick    list.List
@@ -150,12 +153,16 @@ func (p *BackendPool) Set(str string) error {
 func (p *BackendPool) Add(b *Backend) {
 	p.Lock()
 	defer p.Unlock()
-	p.init()
 
 	if b.Sick {
 		b.Element = p.Sick.PushBack(b)
 	} else {
 		b.Element = p.Healthy.PushBack(b)
+	}
+
+	// BackendPool is not running yet. So it's not now to run the backend probing.
+	if p.Changed == nil || p.Quit == nil {
+		return
 	}
 
 	go b.Run(p.Changed, p.Quit)
@@ -179,11 +186,21 @@ func (p *BackendPool) Next() *Backend {
 
 // Run keeps watching changes of the backends' states to keep Healthy/Sick queues updated.
 func (p *BackendPool) Run(quit <-chan struct{}) {
-	p.init()
+	if p.Changed == nil {
+		p.Changed = make(chan *Backend)
+	}
+
+	if p.Quit == nil {
+		p.Quit = make(chan struct{})
+	}
 
 	for e := p.Healthy.Front(); e != nil; e = e.Next() {
 		b := e.Value.(*Backend)
 		go b.Run(p.Changed, p.Quit)
+	}
+
+	if p.Moved != nil {
+		p.Moved <- struct{}{}
 	}
 
 	for {
@@ -199,22 +216,14 @@ func (p *BackendPool) Run(quit <-chan struct{}) {
 			}
 			p.Unlock()
 
-			p.Moved <- b
+			if p.Moved != nil {
+				p.Moved <- struct{}{}
+			}
 
 			log.Printf("backend pool: %s", p)
 		case <-quit:
 			close(p.Quit)
 			return
 		}
-	}
-}
-
-func (p *BackendPool) init() {
-	if p.Changed == nil {
-		p.Changed = make(chan *Backend)
-	}
-
-	if p.Quit == nil {
-		p.Quit = make(chan struct{})
 	}
 }

@@ -62,6 +62,7 @@ type Backend struct {
 
 	Sick     bool
 	Interval time.Duration
+	Timer    <-chan time.Time
 }
 
 func (b *Backend) String() string {
@@ -70,7 +71,8 @@ func (b *Backend) String() string {
 
 // Run keeps probing the backend to keep its state updated.
 // When state changed, it notifies ch.
-func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
+func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
+	log.Printf("run: %s", b)
 	defer log.Printf("done: %s", b)
 
 	if b.Interval == 0 {
@@ -80,14 +82,20 @@ func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 	b.Client.Timeout = 10 * time.Second
 
 	for {
+		t := b.Timer
+		if t == nil {
+			log.Printf("probe after: %s", b.Interval)
+			t = time.After(b.Interval)
+		}
+
 		select {
-		case <-time.After(b.Interval):
+		case <-t:
 			old := b.Sick
 			b.Probe()
 			if old != b.Sick {
 				ch <- b
 			}
-		case <-quit:
+		case <-q:
 			return
 		}
 	}
@@ -96,13 +104,15 @@ func (b *Backend) Run(ch chan<- *Backend, quit <-chan struct{}) {
 // Probe makes a probing request to the background and changes its internal state accordingly.
 func (b *Backend) Probe() {
 	log.Printf("probe: %s", b)
-	defer log.Printf("probe: %s, sick: %t", b, b.Sick)
 
 	resp, err := b.Get(b.URL.String())
 	if err != nil {
+		log.Printf("error response from backend: %s", b)
 		b.Sick = true
 		return
 	}
+
+	log.Printf("status code: %d from backend: %s", resp.StatusCode, b)
 
 	b.Sick = resp.StatusCode >= 400
 }
@@ -112,7 +122,6 @@ type BackendPool struct {
 	sync.RWMutex
 
 	Changed chan *Backend
-	Moved   chan struct{}
 	Quit    chan struct{}
 	Healthy list.List
 	Sick    list.List
@@ -155,15 +164,18 @@ func (p *BackendPool) Add(b *Backend) {
 	p.Lock()
 	defer p.Unlock()
 
+	if p.Changed == nil {
+		p.Changed = make(chan *Backend)
+	}
+
+	if p.Quit == nil {
+		p.Quit = make(chan struct{})
+	}
+
 	if b.Sick {
 		b.Element = p.Sick.PushBack(b)
 	} else {
 		b.Element = p.Healthy.PushBack(b)
-	}
-
-	// BackendPool is not running yet. So it's not now to run the backend probing.
-	if p.Changed == nil || p.Quit == nil {
-		return
 	}
 
 	go b.Run(p.Changed, p.Quit)
@@ -186,22 +198,9 @@ func (p *BackendPool) Next() *Backend {
 }
 
 // Run keeps watching changes of the backends' states to keep Healthy/Sick queues updated.
-func (p *BackendPool) Run(quit <-chan struct{}) {
-	if p.Changed == nil {
-		p.Changed = make(chan *Backend)
-	}
-
-	if p.Quit == nil {
-		p.Quit = make(chan struct{})
-	}
-
-	for e := p.Healthy.Front(); e != nil; e = e.Next() {
-		b := e.Value.(*Backend)
-		go b.Run(p.Changed, p.Quit)
-	}
-
-	if p.Moved != nil {
-		p.Moved <- struct{}{}
+func (p *BackendPool) Run(ch chan struct{}) {
+	if ch != nil {
+		ch <- struct{}{}
 	}
 
 	for {
@@ -217,13 +216,15 @@ func (p *BackendPool) Run(quit <-chan struct{}) {
 			}
 			p.Unlock()
 
-			if p.Moved != nil {
-				p.Moved <- struct{}{}
+			if ch != nil {
+				ch <- struct{}{}
 			}
 
 			log.Printf("backend pool: %s", p)
-		case <-quit:
-			close(p.Quit)
+		case <-ch:
+			if p.Quit != nil {
+				close(p.Quit)
+			}
 			return
 		}
 	}

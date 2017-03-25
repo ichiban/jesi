@@ -207,19 +207,30 @@ func TestBackend_Run(t *testing.T) {
 		transport := testRoundTripper{
 			statuses: tc.statuses,
 		}
-		tc.backend.Interval = time.Nanosecond
+
+		timer := make(chan time.Time)
+		tc.backend.Timer = timer
 		tc.backend.Transport = &transport
 
+		old := tc.backend.Sick
+
 		ch := make(chan *Backend)
-		quit := make(chan struct{})
+		q := make(chan struct{})
 
-		go tc.backend.Run(ch, quit)
+		go tc.backend.Run(ch, q)
 
-		<-ch
-		close(quit)
+		for range tc.statuses {
+			timer <- time.Now()
+		}
+		b := <-ch
+		close(q)
 
-		if len(tc.statuses) != len(transport.urls) {
-			t.Errorf("expedted: %d, got: %d", len(tc.statuses), len(transport.urls))
+		if &tc.backend != b {
+			t.Errorf("expected: %#v, got: %#v", &tc.backend, b)
+		}
+
+		if old == b.Sick {
+			t.Errorf("expected: %t, got: %t", !old, b.Sick)
 		}
 	}
 }
@@ -369,14 +380,14 @@ func TestBackendPool_Run(t *testing.T) {
 		Client: http.Client{
 			Transport: &testRoundTripper{},
 		},
-		Interval: time.Hour, // avoid the backend to actually probe
+		Interval: time.Hour,
 	}
 	b := &Backend{
 		URL: &url.URL{Path: "/foo"},
 		Client: http.Client{
 			Transport: &testRoundTripper{},
 		},
-		Interval: time.Hour, // avoid the backend to actually probe
+		Interval: time.Hour,
 	}
 
 	testCases := []struct {
@@ -411,32 +422,29 @@ func TestBackendPool_Run(t *testing.T) {
 	for i, tc := range testCases {
 		var p BackendPool
 
-		p.Moved = make(chan struct{})
-
 		for _, b := range tc.beforeHealthy {
 			b.Sick = false
 			p.Add(b)
 		}
-
-		q := make(chan struct{})
-
-		go p.Run(q)
 
 		for _, b := range tc.beforeSick {
 			b.Sick = true
 			p.Add(b)
 		}
 
-		<-p.Moved
+		ch := make(chan struct{})
 
-		// fake probings
+		go p.Run(ch)
+
+		<-ch
+
 		for _, b := range tc.change {
 			b.Sick = !b.Sick
 			p.Changed <- b
-			<-p.Moved
+			<-ch
 		}
 
-		close(q)
+		close(ch)
 
 		{
 			var healthy []*Backend

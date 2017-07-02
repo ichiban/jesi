@@ -170,6 +170,7 @@ func TestCacheable(t *testing.T) {
 			resp: &common.ResponseBuffer{
 				StatusCode: http.StatusCreated,
 				HeaderMap: http.Header{
+					"Expires":  []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 					"Location": []string{"http://www.example.com/test"},
 				},
 			},
@@ -183,7 +184,9 @@ func TestCacheable(t *testing.T) {
 			},
 			resp: &common.ResponseBuffer{
 				StatusCode: http.StatusNotFound,
-				HeaderMap:  http.Header{},
+				HeaderMap: http.Header{
+					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
+				},
 			},
 			result: false,
 		},
@@ -197,8 +200,10 @@ func TestCacheable(t *testing.T) {
 			},
 			resp: &common.ResponseBuffer{
 				StatusCode: http.StatusOK,
-				HeaderMap:  http.Header{},
-				Body:       []byte(`{"foo":"bar"}`),
+				HeaderMap: http.Header{
+					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
+				},
+				Body: []byte(`{"foo":"bar"}`),
 			},
 			result: false,
 		},
@@ -212,6 +217,7 @@ func TestCacheable(t *testing.T) {
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"no-store"},
+					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
@@ -227,6 +233,7 @@ func TestCacheable(t *testing.T) {
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"private"},
+					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
@@ -242,8 +249,10 @@ func TestCacheable(t *testing.T) {
 			},
 			resp: &common.ResponseBuffer{
 				StatusCode: http.StatusOK,
-				HeaderMap:  http.Header{},
-				Body:       []byte(`{"foo":"bar"}`),
+				HeaderMap: http.Header{
+					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
+				},
+				Body: []byte(`{"foo":"bar"}`),
 			},
 			result: false,
 		},
@@ -259,12 +268,13 @@ func TestCacheable(t *testing.T) {
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"public"},
+					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
 			result: true,
 		},
-		{ // Responses with Expires header are cacheable.
+		{ // Responses with only Expires header are cacheable.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -289,6 +299,7 @@ func TestCacheable(t *testing.T) {
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"max-age=600"},
+					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
@@ -304,6 +315,7 @@ func TestCacheable(t *testing.T) {
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"s-maxage=600"},
+					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
@@ -319,6 +331,7 @@ func TestCacheable(t *testing.T) {
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"public"},
+					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},

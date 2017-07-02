@@ -260,15 +260,15 @@ func (c *Cache) State(req *http.Request, cached *CachedResponse) (CachedState, t
 	cached.RLock()
 	defer cached.RUnlock()
 
-	if contains(req.Header, pragmaField, noCache) {
+	if contains(req.Header, pragmaField, noStore) {
 		return Revalidate, time.Duration(0)
 	}
 
-	if contains(req.Header, cacheControlField, noCache) {
+	if contains(req.Header, cacheControlField, noStore) {
 		return Revalidate, time.Duration(0)
 	}
 
-	if contains(cached.Header, cacheControlField, noCache) {
+	if contains(cached.Header, cacheControlField, noStore) {
 		return Revalidate, time.Duration(0)
 	}
 

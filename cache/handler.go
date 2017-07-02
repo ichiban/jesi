@@ -28,8 +28,8 @@ const (
 )
 
 var (
-	noCache                         = regexp.MustCompile(`\Ano-cache\z`)
-	noCacheOrPrivate                = regexp.MustCompile(`\A(?:no-cache|private)\z`)
+	noStore                         = regexp.MustCompile(`\Ano-store\z`)
+	noStoreOrPrivate                = regexp.MustCompile(`\A(?:no-store|private)\z`)
 	mustRevalidateOrPublicOrSMaxage = regexp.MustCompile(`\A(?:must-revalidate|public|s-maxage=\d+)\z`)
 	maxAgeOrSMaxageOrPublic         = regexp.MustCompile(`\A(?:max-age=\d+|s-maxage=\d+|public)\z`)
 
@@ -373,11 +373,11 @@ func Cacheable(req *http.Request, resp *common.ResponseBuffer) bool {
 		return false
 	}
 
-	if contains(req.Header, cacheControlField, noCache) {
+	if contains(req.Header, cacheControlField, noStore) {
 		return false
 	}
 
-	if contains(resp.HeaderMap, cacheControlField, noCacheOrPrivate) {
+	if contains(resp.HeaderMap, cacheControlField, noStoreOrPrivate) {
 		return false
 	}
 

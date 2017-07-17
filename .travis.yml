@@ -9,8 +9,8 @@ install:
   - go get github.com/alecthomas/gometalinter
   - gometalinter --install
 script:
-  - gometalinter --deadline=60s --exclude=_test ./...
-  - go test -v ./...
+  - gometalinter --deadline=60s --exclude=_test $(glide novendor)
+  - go test -v $(glide novendor)
 after_success:
   - gox -ldflags "-X main.version=$(git name-rev --tags --name-only $(git rev-parse HEAD))" -output "dist/{{.Dir}}-{{.OS}}-{{.Arch}}" ./...
 deploy:

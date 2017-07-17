@@ -1,0 +1,10 @@
+hash: f7dddc83c9c53b1d6b8b93398a6827c7b3d488c5cee7bf9abd2999505b6b1c36
+updated: 2017-07-17T10:49:55.76545955+09:00
+imports:
+- name: github.com/sirupsen/logrus
+  version: 51dc0fc64317a2861273909081f9c315786533eb
+- name: golang.org/x/sys
+  version: 4cd6d1a821c7175768725b55ca82f14683a29ea4
+  subpackages:
+  - unix
+devImports: []

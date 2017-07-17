@@ -1,15 +1,17 @@
 language: go
 go:
-  - 1.7.x
-  - tip
+  - 1.8.x
 install:
-  - go get -t -v ./...
+  - go get -v github.com/Masterminds/glide
+  - cd $GOPATH/src/github.com/Masterminds/glide && go install && cd -
+  - glide install
   - go get github.com/mitchellh/gox
-  - go get github.com/alecthomas/gometalinter
-  - gometalinter --install
+  - go get -u gopkg.in/alecthomas/gometalinter.v1
+  - gometalinter.v1 --install
+  - go install
 script:
-  - gometalinter --deadline=60s --exclude=_test ./...
-  - go test -v ./...
+  - gometalinter.v1 --fast --deadline=1m --exclude=_test $(glide novendor)
+  - go test -v $(glide novendor)
 after_success:
   - gox -ldflags "-X main.version=$(git name-rev --tags --name-only $(git rev-parse HEAD))" -output "dist/{{.Dir}}-{{.OS}}-{{.Arch}}" ./...
 deploy:

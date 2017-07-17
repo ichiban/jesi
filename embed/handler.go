@@ -5,13 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/ichiban/jesi/common"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -49,7 +49,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Next.ServeHTTP(&resp, r)
 	defer func() {
 		if _, err := resp.WriteTo(w); err != nil {
-			log.Print(err)
+			log.WithFields(log.Fields{
+				"request": r.URL,
+				"error":   err,
+			}).Error("Couldn't write a response")
 		}
 	}()
 
@@ -176,7 +179,13 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		return
 	}
 
-	log.Printf("fetch: %s", uri)
+	log.WithFields(log.Fields{
+		"request": base.URL,
+		"edge":    edge,
+		"pos":     pos,
+		"href":    uri,
+		"next":    next,
+	}).Debug("Will fetch a subresponse")
 
 	req, err := http.NewRequest(http.MethodGet, uri.String(), nil)
 	if err != nil {

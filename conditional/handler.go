@@ -1,11 +1,11 @@
 package conditional
 
 import (
-	"log"
 	"net/http"
 	"strings"
 
 	"github.com/ichiban/jesi/common"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -24,14 +24,16 @@ var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns NotModified if ETag matches.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("conditional req: %s", r.URL)
+	log.WithFields(log.Fields{
+		"request": r.URL,
+	}).Debug("Will serve not modified if so")
 
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		h.Next.ServeHTTP(w, r)
 		return
 	}
 
-	etag := strings.Trim(r.Header.Get(ifNoneMatchField), " ")
+	etag := strings.TrimSpace(r.Header.Get(ifNoneMatchField))
 	if etag == "" {
 		h.Next.ServeHTTP(w, r)
 		return
@@ -39,11 +41,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var resp common.ResponseBuffer
 	h.Next.ServeHTTP(&resp, r)
-
-	if etag != strings.Trim(resp.HeaderMap.Get(etagField), " ") {
+	defer func() {
 		if _, err := resp.WriteTo(w); err != nil {
-			log.Print(err)
+			log.WithFields(log.Fields{
+				"request": r.URL,
+				"error":   err,
+			}).Error("Couldn't write a response")
 		}
+	}()
+
+	if etag != strings.TrimSpace(resp.HeaderMap.Get(etagField)) {
 		return
 	}
 
@@ -51,7 +58,4 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	delete(resp.HeaderMap, contentTypeField)
 	delete(resp.HeaderMap, contentLengthField)
 	resp.Body = nil
-	if _, err := resp.WriteTo(w); err != nil {
-		log.Print(err)
-	}
 }

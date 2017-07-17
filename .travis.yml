@@ -9,7 +9,7 @@ install:
   - go get -u gopkg.in/alecthomas/gometalinter.v1
   - gometalinter.v1 --install
 script:
-  - gometalinter.v1 --deadline=60s --exclude=_test $(glide novendor)
+  - gometalinter.v1 --deadline=3m --exclude=_test $(glide novendor)
   - go test -v $(glide novendor)
 after_success:
   - gox -ldflags "-X main.version=$(git name-rev --tags --name-only $(git rev-parse HEAD))" -output "dist/{{.Dir}}-{{.OS}}-{{.Arch}}" ./...

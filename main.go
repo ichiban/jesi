@@ -32,10 +32,9 @@ func main() {
 
 	go backends.Run(nil)
 
-	var handler http.Handler
-	handler = &balance.Handler{
+	handler := http.Handler(&balance.Handler{
 		BackendPool: &backends,
-	}
+	})
 	handler = &cache.Handler{
 		Next: handler,
 		Cache: cache.Cache{

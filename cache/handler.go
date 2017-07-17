@@ -237,7 +237,7 @@ func freshnessLifetime(cached *CachedResponse) (time.Duration, bool) {
 	}
 
 	if t, ok := expires(cached); ok {
-		return t.Sub(time.Now()), true
+		return time.Until(t), true
 	}
 
 	return 0, false

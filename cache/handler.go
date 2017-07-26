@@ -3,7 +3,6 @@ package cache
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -11,6 +10,8 @@ import (
 	"time"
 
 	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/request"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -56,18 +57,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cached := h.Get(r)
 	state, delta := h.State(r, cached)
 
+	log.WithFields(log.Fields{
+		"request": request.ID(r),
+		"state":   state,
+		"delta":   delta,
+	}).Info("Got a state of a cached response")
+
 	switch state {
 	case Fresh:
-		log.Printf("fresh: %s", r.URL)
-		serveFresh(w, cached)
+		serveFresh(w, cached, r)
 		return
 	case Stale:
-		if maxStale(cached) < delta {
+		if max := maxStale(cached); max < delta {
+			log.WithFields(log.Fields{
+				"request":   request.ID(r),
+				"max-stale": max,
+				"delta":     delta,
+			}).Debug("Delta exceeded max-stale.")
+
 			break
 		}
 
-		log.Printf("stale: %s", r.URL)
-		serveStale(w, cached)
+		serveStale(w, cached, r)
 		return
 	case Revalidate:
 		log.Printf("revalidate: %s", r.URL)
@@ -85,13 +96,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	respTime := time.Now()
 	defer func() {
 		if _, err := resp.WriteTo(w); err != nil {
-			log.Print(err)
+			log.WithFields(log.Fields{
+				"request": request.ID(r),
+				"error":   err,
+			}).Error("Couldn't write a response")
 		}
 	}()
 
 	if !resp.Successful() {
+		log.WithFields(log.Fields{
+			"request": request.ID(r),
+			"status":  resp.StatusCode,
+		}).Debug("Couldn't get a successful response")
+
 		if state == Stale {
-			log.Printf("stale: %s", r.URL)
+			log.WithFields(log.Fields{
+				"request": request.ID(r),
+			}).Debug("Will serve a stale response")
+
 			resp = *staleResponse(cached)
 		}
 		return
@@ -99,27 +121,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if originChanged(r, &resp) {
 		h.OriginChangedAt = respTime
+
+		log.WithFields(log.Fields{
+			"request": request.ID(r),
+			"at":      respTime,
+		}).Info("The origin changed")
 	}
 
 	if revalidated(state, &resp) {
-		log.Printf("validated: %s", r.URL)
+		log.WithFields(log.Fields{
+			"request": request.ID(r),
+		}).Debug("Will serve a revalidated response")
+
 		resp = *revalidatedResponse(&resp, cached)
 	}
 
 	h.cacheIfPossible(&origReq, &resp, reqTime, respTime)
 }
 
-func serveFresh(w io.Writer, cached *CachedResponse) {
+func serveFresh(w io.Writer, cached *CachedResponse, r *http.Request) {
 	resp := cached.Response()
 	if _, err := resp.WriteTo(w); err != nil {
-		log.Print(err)
+		log.WithFields(log.Fields{
+			"request": request.ID(r),
+			"error":   err,
+		}).Error("Couldn't write a response")
 	}
 }
 
-func serveStale(w io.Writer, cached *CachedResponse) {
+func serveStale(w io.Writer, cached *CachedResponse, r *http.Request) {
 	resp := staleResponse(cached)
 	if _, err := resp.WriteTo(w); err != nil {
-		log.Print(err)
+		log.WithFields(log.Fields{
+			"request": request.ID(r),
+			"error":   err,
+		}).Error("Couldn't write a response")
 	}
 }
 

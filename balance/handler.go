@@ -4,7 +4,6 @@ import (
 	"container/list"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -12,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ichiban/jesi/request"
+	log "github.com/sirupsen/logrus"
 )
 
 // Handler is a reverse proxy with multiple backends.
@@ -34,11 +36,17 @@ func (h *Handler) direct(r *http.Request) {
 	b := h.BackendPool.Next()
 
 	if b == nil {
+		log.WithFields(log.Fields{
+			"request": request.ID(r),
+		}).Warn("Couldn't find a backend in the pool")
+
 		return
 	}
 
-	log.Printf("balance from: %s", h.BackendPool)
-	log.Printf("balance: %s", b.URL)
+	log.WithFields(log.Fields{
+		"request": request.ID(r),
+		"backend": b,
+	}).Info("Picked up a backend from the pool")
 
 	r.URL.Scheme = b.URL.Scheme
 	r.URL.Host = b.URL.Host
@@ -52,6 +60,11 @@ func (h *Handler) direct(r *http.Request) {
 		// explicitly disable User-Agent so it's not set to default value
 		r.Header.Set("User-Agent", "")
 	}
+
+	log.WithFields(log.Fields{
+		"request": request.ID(r),
+		"url":     r.URL,
+	}).Info("Directed a request to a backend")
 }
 
 // Backend represents an upstream server.

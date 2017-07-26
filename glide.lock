@@ -1,0 +1,12 @@
+hash: aa17a221f96effff92c79df3a90d9c9cf9058f43446f84e9f96f00dce982076d
+updated: 2017-07-17T15:07:45.174248638+09:00
+imports:
+- name: github.com/satori/go.uuid
+  version: 5bf94b69c6b68ee1b541973bb8e1144db23a194b
+- name: github.com/sirupsen/logrus
+  version: 51dc0fc64317a2861273909081f9c315786533eb
+- name: golang.org/x/sys
+  version: 4cd6d1a821c7175768725b55ca82f14683a29ea4
+  subpackages:
+  - unix
+devImports: []

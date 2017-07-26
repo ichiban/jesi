@@ -5,13 +5,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/request"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -38,10 +39,10 @@ var _ http.Handler = (*Handler)(nil)
 // ServeHTTP fetches a response from the underlying handler and if it contains links matching the embedding spec,
 // also fetches linked documents and embeds them.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		h.Next.ServeHTTP(w, r)
-		return
-	}
+	r = request.WithID(r)
+	log.WithFields(log.Fields{
+		"request": request.ID(r),
+	}).Info("Started a request")
 
 	spec := stripSpec(r)
 
@@ -49,7 +50,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Next.ServeHTTP(&resp, r)
 	defer func() {
 		if _, err := resp.WriteTo(w); err != nil {
-			log.Print(err)
+			log.WithFields(log.Fields{
+				"request": request.ID(r),
+				"error":   err,
+			}).Error("Couldn't write a response")
 		}
 	}()
 
@@ -85,6 +89,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, ok := resp.HeaderMap[warningField]; !ok {
 		resp.HeaderMap.Set(warningField, `214 - "Transformation Applied"`)
 	}
+
+	log.WithFields(log.Fields{
+		"request": request.ID(r),
+	}).Info("Finished a request")
 }
 
 type specifier map[string]specifier
@@ -176,7 +184,13 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		return
 	}
 
-	log.Printf("fetch: %s", uri)
+	log.WithFields(log.Fields{
+		"request": request.ID(base),
+		"edge":    edge,
+		"pos":     pos,
+		"href":    uri,
+		"next":    next,
+	}).Debug("Will fetch a subresource")
 
 	req, err := http.NewRequest(http.MethodGet, uri.String(), nil)
 	if err != nil {
@@ -184,6 +198,12 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		return
 	}
 	req.Header = base.Header
+	req = request.WithID(req)
+	log.WithFields(log.Fields{
+		"request": request.ID(req),
+		"parent":  request.ID(base),
+	}).Info("Started a subrequest")
+
 	var resp common.ResponseBuffer
 	h.Next.ServeHTTP(&resp, req)
 
@@ -210,6 +230,11 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		cacheControl: res.cacheControl,
 		data:         res.data,
 	}
+
+	log.WithFields(log.Fields{
+		"request": request.ID(req),
+		"parent":  request.ID(base),
+	}).Info("Finished a subrequest")
 }
 
 func errorResource(edge string, pos *int, e *Error) *resource {

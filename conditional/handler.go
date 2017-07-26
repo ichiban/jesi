@@ -1,11 +1,12 @@
 package conditional
 
 import (
-	"log"
 	"net/http"
 	"strings"
 
 	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/request"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -24,7 +25,9 @@ var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns NotModified if ETag matches.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("conditional req: %s", r.URL)
+	log.WithFields(log.Fields{
+		"request": request.ID(r),
+	}).Debug("Will serve not modified if so")
 
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		h.Next.ServeHTTP(w, r)
@@ -42,7 +45,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if etag != strings.Trim(resp.HeaderMap.Get(etagField), " ") {
 		if _, err := resp.WriteTo(w); err != nil {
-			log.Print(err)
+			log.WithFields(log.Fields{
+				"request": request.ID(r),
+				"error":   err,
+			}).Error("Couldn't write a response")
 		}
 		return
 	}

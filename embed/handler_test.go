@@ -88,34 +88,34 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			},
 			body: `{"_embedded":{"foo":{"type":"https://ichiban.github.io/jesi/problems/response-error","title":"Response Error","status":404,"detail":"Not Found","_links":{"about":"/b"}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},
-		{ // the resulting Store-Control is the weakest of all.
+		{ // the resulting Cache-Control is the weakest of all.
 			url: "/a?with=foo.bar.baz",
 			resources: map[string]*testResource{
 				"/a": {
 					header: http.Header{
 						"Content-Type":  []string{"application/json"},
-						"Store-Control": []string{"public,max-age=30"},
+						"Cache-Control": []string{"public,max-age=30"},
 					},
 					body: `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
 				"/b": {
 					header: http.Header{
 						"Content-Type":  []string{"application/json"},
-						"Store-Control": []string{"private,max-age=20"},
+						"Cache-Control": []string{"private,max-age=20"},
 					},
 					body: `{"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}`,
 				},
 				"/c": {
 					header: http.Header{
 						"Content-Type":  []string{"application/json"},
-						"Store-Control": []string{"public,max-age=10"},
+						"Cache-Control": []string{"public,max-age=10"},
 					},
 					body: `{"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}`,
 				},
 			},
 			header: http.Header{
 				"Content-Type":  []string{"application/json"},
-				"Store-Control": []string{"private,max-age=10"},
+				"Cache-Control": []string{"private,max-age=10"},
 			},
 			body: `{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{},"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}},"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 		},

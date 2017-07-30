@@ -22,9 +22,11 @@ const (
 	links    = "_links"
 	embedded = "_embedded"
 
-	contentTypeField = "Content-Type"
-	warningField     = "Warning"
-	etagField        = "Etag"
+	cacheControlField = "Cache-Control"
+	contentTypeField  = "Content-Type"
+	warningField      = "Warning"
+	etagField         = "Etag"
+	expiresField      = "Expires"
 )
 
 var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
@@ -66,17 +68,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := &resource{
-		cacheControl: NewCacheControl(&rep),
+	doc := &document{
+		CacheControl: NewCacheControl(&rep),
 		data:         data,
 	}
-	h.embed(r, res, spec)
+	h.embed(r, doc, spec)
 
-	delete(rep.HeaderMap, expires)
-	rep.HeaderMap[cacheControl] = []string{res.cacheControl.String()}
+	delete(rep.HeaderMap, expiresField)
+	rep.HeaderMap[cacheControlField] = []string{doc.CacheControl.String()}
 
 	var err error
-	rep.Body, err = json.Marshal(res.data)
+	rep.Body, err = json.Marshal(doc.data)
 	if err != nil {
 		return
 	}
@@ -120,19 +122,19 @@ func stripSpec(req *http.Request) specifier {
 	return spec
 }
 
-type resource struct {
-	edge         string
-	pos          *int
-	cacheControl *CacheControl
-	data         interface{}
+type document struct {
+	*CacheControl
+	edge string
+	pos  *int
+	data interface{}
 }
 
-func (h *Handler) embed(req *http.Request, res *resource, spec specifier) {
+func (h *Handler) embed(req *http.Request, doc *document, spec specifier) {
 	if len(spec) == 0 {
 		return
 	}
 
-	parent := res.data.(map[string]interface{})
+	parent := doc.data.(map[string]interface{})
 	ls := parent[links].(map[string]interface{})
 	es, ok := parent[embedded].(map[string]interface{})
 	if !ok {
@@ -141,7 +143,7 @@ func (h *Handler) embed(req *http.Request, res *resource, spec specifier) {
 		es = m
 	}
 
-	ch := make(chan *resource, len(spec))
+	ch := make(chan *document, len(spec))
 	defer close(ch)
 
 	count := 0
@@ -173,14 +175,14 @@ func (h *Handler) embed(req *http.Request, res *resource, spec specifier) {
 		} else {
 			es[sub.edge].([]interface{})[*sub.pos] = sub.data
 		}
-		res.cacheControl = res.cacheControl.Merge(sub.cacheControl)
+		doc.CacheControl = doc.CacheControl.Merge(sub.CacheControl)
 	}
 }
 
-func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, next specifier, ch chan<- *resource) {
+func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, next specifier, ch chan<- *document) {
 	uri, err := url.Parse(href)
 	if err != nil {
-		ch <- errorResource(edge, pos, NewMalformedURLError(err))
+		ch <- errorDocument(edge, pos, NewMalformedURLError(err))
 		return
 	}
 
@@ -190,11 +192,11 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		"pos":     pos,
 		"href":    uri,
 		"next":    next,
-	}).Debug("Will fetch a subresource")
+	}).Debug("Will fetch a subdocument")
 
 	req, err := http.NewRequest(http.MethodGet, uri.String(), nil)
 	if err != nil {
-		ch <- errorResource(edge, pos, NewMalformedSubRequestError(err, uri))
+		ch <- errorDocument(edge, pos, NewMalformedSubRequestError(err, uri))
 		return
 	}
 	req.Header = base.Header
@@ -204,31 +206,31 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		"parent":  request.ID(base),
 	}).Info("Started a subrequest")
 
-	var resp cache.Representation
-	h.Next.ServeHTTP(&resp, req)
+	var rep cache.Representation
+	h.Next.ServeHTTP(&rep, req)
 
-	if !resp.Successful() {
-		ch <- errorResource(edge, pos, NewResponseError(&resp, uri))
+	if !rep.Successful() {
+		ch <- errorDocument(edge, pos, NewResponseError(&rep, uri))
 		return
 	}
 
 	var data map[string]interface{}
-	if err := json.Unmarshal(resp.Body, &data); err != nil {
-		ch <- errorResource(edge, pos, NewMalformedJSONError(err, uri))
+	if err := json.Unmarshal(rep.Body, &data); err != nil {
+		ch <- errorDocument(edge, pos, NewMalformedJSONError(err, uri))
 		return
 	}
 
-	res := &resource{
-		cacheControl: NewCacheControl(&resp),
+	doc := &document{
+		CacheControl: NewCacheControl(&rep),
 		data:         data,
 	}
-	h.embed(req, res, next)
+	h.embed(req, doc, next)
 
-	ch <- &resource{
+	ch <- &document{
+		CacheControl: doc.CacheControl,
 		edge:         edge,
 		pos:          pos,
-		cacheControl: res.cacheControl,
-		data:         res.data,
+		data:         doc.data,
 	}
 
 	log.WithFields(log.Fields{
@@ -237,13 +239,13 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 	}).Info("Finished a subrequest")
 }
 
-func errorResource(edge string, pos *int, e *Error) *resource {
-	return &resource{
+func errorDocument(edge string, pos *int, e *Error) *document {
+	return &document{
+		CacheControl: &CacheControl{
+			NoStore: true,
+		},
 		edge: edge,
 		pos:  pos,
-		cacheControl: &CacheControl{
-			NoCache: true,
-		},
 		data: e,
 	}
 }

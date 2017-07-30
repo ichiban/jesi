@@ -13,19 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	pragmaField          = "Pragma"
-	cacheControlField    = "Store-Control"
-	expiresField         = "Expires"
-	authorizationField   = "Authorization"
-	dateField            = "Date"
-	ageField             = "Age"
-	warningField         = "Warning"
-	etagField            = "ETag"
-	ifNoneMatchField     = "If-None-Match"
-	lastModifiedField    = "Last-Modified"
-	ifModifiedSinceField = "If-Modified-Since"
-)
 
 var (
 	noStore                         = regexp.MustCompile(`\Ano-store\z`)

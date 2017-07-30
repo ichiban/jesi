@@ -2,13 +2,27 @@ package embed
 
 import (
 	"fmt"
+	"github.com/ichiban/jesi/cache"
 	"strconv"
 	"strings"
 	"time"
-	"github.com/ichiban/jesi/cache"
 )
 
-// CacheControl represents a response's cache policy.
+const (
+	dateField = "Date"
+)
+
+const (
+	mustRevalidateDirective = "must-revalidate"
+	noCacheDirective        = "no-cache"
+	noStoreDirective        = "no-store"
+	publicDirective         = "public"
+	privateDirective        = "private"
+	immutableDirective      = "immutable"
+	maxAgeDirective         = "max-age"
+)
+
+// CacheControl represents a representation's cache policy.
 type CacheControl struct {
 	MustRevalidate bool
 	NoCache        bool
@@ -19,40 +33,26 @@ type CacheControl struct {
 	MaxAge         *time.Duration
 }
 
-const (
-	expires      = "Expires"
-	date         = "Date"
-	cacheControl = "Store-Control"
-
-	mustRevalidate = "must-revalidate"
-	noCache        = "no-cache"
-	noStore        = "no-store"
-	public         = "public"
-	private        = "private"
-	immutable      = "immutable"
-	maxAge         = "max-age"
-)
-
 // NewCacheControl creates a new instance of CacheControl from related headers in the given HTTP response.
 func NewCacheControl(rep *cache.Representation) *CacheControl {
-	c := newCacheControlExpires(rep)
+	c := newControlExpires(rep)
 
 	for _, d := range directives(rep) {
 		ts := strings.Split(d, "=")
 		switch ts[0] {
-		case mustRevalidate:
+		case mustRevalidateDirective:
 			c.MustRevalidate = true
-		case noCache:
+		case noCacheDirective:
 			c.NoCache = true
-		case noStore:
+		case noStoreDirective:
 			c.NoStore = true
-		case public:
+		case publicDirective:
 			c.Public = true
-		case private:
+		case privateDirective:
 			c.Private = true
-		case immutable:
+		case immutableDirective:
 			c.Immutable = true
-		case maxAge:
+		case maxAgeDirective:
 			n, err := strconv.Atoi(ts[1])
 			if err != nil {
 				continue
@@ -65,11 +65,11 @@ func NewCacheControl(rep *cache.Representation) *CacheControl {
 	return c
 }
 
-// Convert Expires to Store-Control: max-age
-func newCacheControlExpires(rep *cache.Representation) *CacheControl {
+// Convert Expires to Cache-Control: max-age
+func newControlExpires(rep *cache.Representation) *CacheControl {
 	var c CacheControl
 
-	e, ok := rep.HeaderMap[expires]
+	e, ok := rep.HeaderMap[expiresField]
 	if !ok {
 		return &c
 	}
@@ -82,7 +82,7 @@ func newCacheControlExpires(rep *cache.Representation) *CacheControl {
 		return &c
 	}
 
-	d, ok := rep.HeaderMap[date]
+	d, ok := rep.HeaderMap[dateField]
 	if !ok {
 		return &c
 	}
@@ -99,10 +99,10 @@ func newCacheControlExpires(rep *cache.Representation) *CacheControl {
 }
 
 // TODO: Proper directive parsing.
-// Store-Control directives can be something like `private="foo,bar,baz"`.
+// Cache-Control directives can be something like `private="foo,bar,baz"`.
 func directives(rep *cache.Representation) []string {
 	ds := []string{}
-	for _, v := range rep.HeaderMap[cacheControl] {
+	for _, v := range rep.HeaderMap[cacheControlField] {
 		for _, d := range strings.Split(v, ",") {
 			d = strings.Trim(d, " ")
 			ds = append(ds, d)
@@ -111,7 +111,7 @@ func directives(rep *cache.Representation) []string {
 	return ds
 }
 
-// Merge merges 2 CacheControls.
+// Merge merges 2 Controls.
 func (c *CacheControl) Merge(o *CacheControl) *CacheControl {
 	var n CacheControl
 
@@ -134,31 +134,31 @@ func (c *CacheControl) String() string {
 	var ds []string
 
 	if c.MustRevalidate {
-		ds = append(ds, mustRevalidate)
+		ds = append(ds, mustRevalidateDirective)
 	}
 
 	if c.NoCache {
-		ds = append(ds, noCache)
+		ds = append(ds, noCacheDirective)
 	}
 
 	if c.NoStore {
-		ds = append(ds, noStore)
+		ds = append(ds, noStoreDirective)
 	}
 
 	if c.Public {
-		ds = append(ds, public)
+		ds = append(ds, publicDirective)
 	}
 
 	if c.Private {
-		ds = append(ds, private)
+		ds = append(ds, privateDirective)
 	}
 
 	if c.Immutable {
-		ds = append(ds, immutable)
+		ds = append(ds, immutableDirective)
 	}
 
 	if c.MaxAge != nil {
-		ds = append(ds, fmt.Sprintf("%s=%d", maxAge, *c.MaxAge/time.Second))
+		ds = append(ds, fmt.Sprintf("%s=%d", maxAgeDirective, *c.MaxAge/time.Second))
 	}
 
 	return strings.Join(ds, ",")

@@ -28,7 +28,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 						"http://www.example.com/test": {
 							StatusCode: http.StatusOK,
 							HeaderMap: http.Header{
-								"Store-Control": []string{"public"},
+								"Cache-Control": []string{"public"},
 							},
 							Body: []byte(`{"foo":"bar"}`),
 						},
@@ -43,7 +43,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"public"},
+					"Cache-Control": []string{"public"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
@@ -56,7 +56,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 						"http://www.example.com/test": {
 							StatusCode: http.StatusOK,
 							HeaderMap: http.Header{
-								"Store-Control": []string{"private"},
+								"Cache-Control": []string{"private"},
 							},
 							Body: []byte(`{"foo":"bar"}`),
 						},
@@ -71,7 +71,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"private"},
+					"Cache-Control": []string{"private"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
 			},
@@ -87,7 +87,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 								"": {
 									StatusCode: http.StatusOK,
 									HeaderMap: http.Header{
-										"Store-Control": []string{"s-maxage=600"},
+										"Cache-Control": []string{"s-maxage=600"},
 									},
 									Body:         []byte(`{"foo":"bar"}`),
 									RequestTime:  time.Now(),
@@ -194,7 +194,7 @@ func TestCacheable(t *testing.T) {
 				Method: http.MethodGet,
 				URL:    url,
 				Header: http.Header{
-					"Store-Control": []string{"no-store"},
+					"Cache-Control": []string{"no-store"},
 				},
 			},
 			rep: &Representation{
@@ -215,7 +215,7 @@ func TestCacheable(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"no-store"},
+					"Cache-Control": []string{"no-store"},
 					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
@@ -231,7 +231,7 @@ func TestCacheable(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"private"},
+					"Cache-Control": []string{"private"},
 					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
@@ -266,7 +266,7 @@ func TestCacheable(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"public"},
+					"Cache-Control": []string{"public"},
 					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
@@ -297,7 +297,7 @@ func TestCacheable(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"max-age=600"},
+					"Cache-Control": []string{"max-age=600"},
 					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
@@ -313,7 +313,7 @@ func TestCacheable(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"s-maxage=600"},
+					"Cache-Control": []string{"s-maxage=600"},
 					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
@@ -329,7 +329,7 @@ func TestCacheable(t *testing.T) {
 			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
-					"Store-Control": []string{"public"},
+					"Cache-Control": []string{"public"},
 					"Expires":       []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 				},
 				Body: []byte(`{"foo":"bar"}`),
@@ -393,7 +393,7 @@ func TestHandler_State(t *testing.T) {
 			req: &http.Request{
 				URL: url,
 				Header: http.Header{
-					"Store-Control": []string{"no-store"},
+					"Cache-Control": []string{"no-store"},
 				},
 			},
 			cached: &Representation{
@@ -413,7 +413,7 @@ func TestHandler_State(t *testing.T) {
 			},
 			cached: &Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"no-store"},
+					"Cache-Control": []string{"no-store"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
@@ -431,7 +431,7 @@ func TestHandler_State(t *testing.T) {
 			},
 			cached: &Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"s-maxage=3"},
+					"Cache-Control": []string{"s-maxage=3"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
@@ -448,7 +448,7 @@ func TestHandler_State(t *testing.T) {
 			},
 			cached: &Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"s-maxage=3"},
+					"Cache-Control": []string{"s-maxage=3"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
@@ -465,7 +465,7 @@ func TestHandler_State(t *testing.T) {
 			},
 			cached: &Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"max-age=3"},
+					"Cache-Control": []string{"max-age=3"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
@@ -499,7 +499,7 @@ func TestHandler_State(t *testing.T) {
 			},
 			cached: &Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"max-age=1, must-revalidate"},
+					"Cache-Control": []string{"max-age=1, must-revalidate"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
@@ -516,7 +516,7 @@ func TestHandler_State(t *testing.T) {
 			},
 			cached: &Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"max-age=2"},
+					"Cache-Control": []string{"max-age=2"},
 				},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),

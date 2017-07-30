@@ -10,17 +10,17 @@ import (
 
 func TestNewCacheControl(t *testing.T) {
 	testCases := []struct {
-		resp *cache.Representation
-		cc   *CacheControl
+		rep *cache.Representation
+		cc  *CacheControl
 	}{
 		{
-			resp: &cache.Representation{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{},
 			},
 			cc: &CacheControl{},
 		},
-		{ // If we find Expires, convert it to Store-Control: max-date.
-			resp: &cache.Representation{
+		{ // If we find Expires, convert it to Store-CacheControl: max-date.
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
 					"Date":    []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:10 GMT"},
@@ -34,7 +34,7 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{ // If we can't parse Expires (especially "0"), that means max-age=0.
-			resp: &cache.Representation{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
 					"Expires": []string{"0"},
 				},
@@ -47,9 +47,9 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{
-			resp: &cache.Representation{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{
+					"Cache-Control": []string{
 						"must-revalidate",
 						"no-cache",
 						"no-store",
@@ -74,9 +74,9 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{
-			resp: &cache.Representation{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
-					"Store-Control": []string{"must-revalidate, no-cache, no-store, public, private, immutable, max-age=123456789"},
+					"Cache-Control": []string{"must-revalidate, no-cache, no-store, public, private, immutable, max-age=123456789"},
 				},
 			},
 			cc: &CacheControl{
@@ -95,7 +95,7 @@ func TestNewCacheControl(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		result := NewCacheControl(tc.resp)
+		result := NewCacheControl(tc.rep)
 
 		if tc.cc.MustRevalidate != result.MustRevalidate {
 			t.Errorf("(%d) MustRevalidate: expected %#v, got %#v", i, tc.cc.MustRevalidate, result.MustRevalidate)

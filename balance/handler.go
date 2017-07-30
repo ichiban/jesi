@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ichiban/jesi/request"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -36,14 +37,14 @@ func (h *Handler) direct(r *http.Request) {
 
 	if b == nil {
 		log.WithFields(log.Fields{
-			"request": r.URL,
+			"request": request.ID(r),
 		}).Warn("Couldn't find a backend in the pool")
 
 		return
 	}
 
 	log.WithFields(log.Fields{
-		"request": r.URL,
+		"request": request.ID(r),
 		"backend": b,
 	}).Info("Picked up a backend from the pool")
 
@@ -61,7 +62,8 @@ func (h *Handler) direct(r *http.Request) {
 	}
 
 	log.WithFields(log.Fields{
-		"request": r.URL.String(),
+		"request": request.ID(r),
+		"url":     r.URL,
 	}).Info("Directed a request to a backend")
 }
 

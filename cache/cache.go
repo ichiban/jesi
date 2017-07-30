@@ -2,7 +2,6 @@ package cache
 
 import (
 	"container/list"
-	"log"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ichiban/jesi/common"
+	log "github.com/sirupsen/logrus"
 )
 
 // Cache stores pairs of requests/responses.
@@ -31,7 +31,12 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	defer c.Unlock()
 
 	urlKey := NewURLKey(req)
-	log.Printf("set: %#v", urlKey)
+	log.WithFields(log.Fields{
+		"method": urlKey.Method,
+		"host":   urlKey.Host,
+		"path":   urlKey.Path,
+		"query":  urlKey.Query,
+	}).Debug("Will set a set of variations to a URL key")
 
 	variations, ok := c.URLVars[urlKey]
 	if !ok {
@@ -40,8 +45,20 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	}
 
 	varKey := NewVarKey(variations, req)
+	log.WithFields(log.Fields{
+		"variation": varKey,
+	}).Debug("Will set a cached response to a variation key")
+
 	if old, ok := variations.VarResponse[varKey]; ok && old.Element != nil {
 		c.History.Remove(old.Element)
+
+		log.WithFields(log.Fields{
+			"method":    urlKey.Method,
+			"host":      urlKey.Host,
+			"path":      urlKey.Path,
+			"query":     urlKey.Query,
+			"variation": varKey,
+		}).Debug("Removed an old cached response from the history")
 	}
 	variations.VarResponse[varKey] = cached
 	cached.Element = c.History.PushFront(key{primary: urlKey, secondary: varKey})
@@ -53,24 +70,36 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 	var stats runtime.MemStats
 	for i := 0; i < c.History.Len(); i++ {
 		runtime.ReadMemStats(&stats)
-		log.Printf("inuse: %dB, max: %dB\n", stats.HeapInuse, c.Max)
+
+		log.WithFields(log.Fields{
+			"inuse": stats.HeapInuse,
+			"max":   c.Max,
+		}).Info("Read memory stats")
+
 		if stats.HeapInuse < c.Max {
 			break
 		}
-		c.removeLRU()
+
+		c.evictLRU()
 	}
 }
 
-func (c *Cache) removeLRU() {
+func (c *Cache) evictLRU() {
 	e := c.History.Back()
 	if e == nil {
-		log.Print("no cached response to free")
+		log.Warn("Couldn't find a cached response to free")
 		return
 	}
 	c.History.Remove(e)
 	k := e.Value.(key)
 
-	log.Printf("evict: %#v", k)
+	log.WithFields(log.Fields{
+		"method":    k.primary.Method,
+		"host":      k.primary.Host,
+		"path":      k.primary.Path,
+		"query":     k.primary.Query,
+		"variation": k.secondary,
+	}).Debug("Will evict a key from the cache")
 
 	pe, ok := c.URLVars[k.primary]
 	if !ok {
@@ -84,6 +113,14 @@ func (c *Cache) removeLRU() {
 	if len(pe.VarResponse) == 0 {
 		delete(c.URLVars, k.primary)
 	}
+
+	log.WithFields(log.Fields{
+		"method":    k.primary.Method,
+		"host":      k.primary.Host,
+		"path":      k.primary.Path,
+		"query":     k.primary.Query,
+		"variation": k.secondary,
+	}).Info("Evicted a key from the cache")
 }
 
 // Get retrieves a cached response.
@@ -94,20 +131,62 @@ func (c *Cache) Get(req *http.Request) *CachedResponse {
 	defer c.RUnlock()
 
 	pKey := NewURLKey(req)
+	log.WithFields(log.Fields{
+		"method": pKey.Method,
+		"host":   pKey.Host,
+		"path":   pKey.Path,
+		"query":  pKey.Query,
+	}).Debug("Will get a set of variations for a URL key")
+
 	pe, ok := c.URLVars[pKey]
 	if !ok {
+		log.WithFields(log.Fields{
+			"method": pKey.Method,
+			"host":   pKey.Host,
+			"path":   pKey.Path,
+			"query":  pKey.Query,
+		}).Debug("Couldn't get a set of variations for a URL key")
+
 		return nil
 	}
 
 	sKey := NewVarKey(pe, req)
+	log.WithFields(log.Fields{
+		"variation": sKey,
+	}).Debug("Will get a cached response for a variation key")
+
 	cached, ok := pe.VarResponse[sKey]
 	if !ok {
+		log.WithFields(log.Fields{
+			"method":    pKey.Method,
+			"host":      pKey.Host,
+			"path":      pKey.Path,
+			"query":     pKey.Query,
+			"variation": sKey,
+		}).Debug("Couldn't get a cached response for the key")
+
 		return nil
 	}
 
 	if cached.Element != nil {
 		c.History.MoveToFront(cached.Element)
+
+		log.WithFields(log.Fields{
+			"method":    pKey.Method,
+			"host":      pKey.Host,
+			"path":      pKey.Path,
+			"query":     pKey.Query,
+			"variation": sKey,
+		}).Debug("Marked a cached response as recently used")
 	}
+
+	log.WithFields(log.Fields{
+		"method":    pKey.Method,
+		"host":      pKey.Host,
+		"path":      pKey.Path,
+		"query":     pKey.Query,
+		"variation": sKey,
+	}).Debug("Got a cached response for the key")
 
 	return cached
 }
@@ -293,4 +372,19 @@ func (c *Cache) State(req *http.Request, cached *CachedResponse) (CachedState, t
 	}
 
 	return Revalidate, time.Duration(0)
+}
+
+func (s CachedState) String() string {
+	switch s {
+	case Miss:
+		return "miss"
+	case Fresh:
+		return "fresh"
+	case Stale:
+		return "stale"
+	case Revalidate:
+		return "revalidate"
+	default:
+		return "unknown"
+	}
 }

@@ -52,10 +52,17 @@ var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns a cached response if found. Otherwise, retrieves one from the underlying handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("cache serve: %s", r.URL)
+	log.WithFields(log.Fields{
+		"request": r.URL,
+	}).Debug("Will serve a cached response if exists")
 
 	cached := h.Get(r)
 	state, delta := h.State(r, cached)
+	log.WithFields(log.Fields{
+		"request": r.URL,
+		"state":   state,
+		"delta":   delta,
+	}).Info("Got a state of a request")
 
 	log.WithFields(log.Fields{
 		"request": request.ID(r),
@@ -81,13 +88,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serveStale(w, cached, r)
 		return
 	case Revalidate:
-		log.Printf("revalidate: %s", r.URL)
 		r = revalidateRequest(r, cached)
 	}
 
+	// Keep the original request since `balance.Handler` will modify the request.
 	origReq := *r
 	origURL := *r.URL
-	log.Printf("origURL: %s", origURL.String())
 	origReq.URL = &origURL
 
 	var resp common.ResponseBuffer
@@ -246,7 +252,7 @@ func freshnessLifetime(cached *CachedResponse) (time.Duration, bool) {
 	}
 
 	if t, ok := expires(cached); ok {
-		return t.Sub(time.Now()), true
+		return time.Until(t), true
 	}
 
 	return 0, false

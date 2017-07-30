@@ -32,7 +32,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		{ // if there're multiple backends available, it spreads the workload across them.
 			backends: []*Backend{
 				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
-				{URL: &url.URL{Scheme: "https", Host: "p.example.com"}},
+				{URL: &url.URL{Scheme: "https", Host: "b.example.com"}},
 				{URL: &url.URL{Scheme: "https", Host: "c.example.com"}},
 			},
 			reqURL:  url.URL{Path: "/foo"},
@@ -40,10 +40,10 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 			directed: []url.URL{
 				{Scheme: "https", Host: "a.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "p.example.com", Path: "/foo"},
+				{Scheme: "https", Host: "b.example.com", Path: "/foo"},
 				{Scheme: "https", Host: "c.example.com", Path: "/foo"},
 				{Scheme: "https", Host: "a.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "p.example.com", Path: "/foo"},
+				{Scheme: "https", Host: "b.example.com", Path: "/foo"},
 				{Scheme: "https", Host: "c.example.com", Path: "/foo"},
 			},
 		},
@@ -63,6 +63,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	for i, tc := range testCases {
 		var p BackendPool
 		for _, b := range tc.backends {
+			b.Client = http.Client{Transport: &testRoundTripper{statuses: []int{http.StatusOK}}}
 			p.Add(b)
 		}
 
@@ -237,28 +238,34 @@ func TestBackend_Run(t *testing.T) {
 
 func TestBackendPool_Set(t *testing.T) {
 	testCases := []struct {
-		p BackendPool
-		b string
+		s int
+		q string
 	}{
 		{
-			p: BackendPool{},
-			b: "http://example.com/foo",
+			s: http.StatusOK,
+			q: "healthy",
+		},
+		{
+			s: http.StatusInternalServerError,
+			q: "sick",
 		},
 	}
 
 	for _, tc := range testCases {
-		tc.p.Set(tc.b)
+		var p BackendPool
+		p.RoundTripper = &testRoundTripper{statuses: []int{tc.s}}
+		p.Set("http://example.com/foo")
 
-		var found bool
-		for e := tc.p.Healthy.Front(); e != nil; e.Next() {
-			b := e.Value.(*Backend)
-			if b.URL.String() == tc.b {
-				found = true
-				break
-			}
+		var queue string
+		if p.Healthy.Len() > 0 {
+			queue = "healthy"
 		}
-		if !found {
-			t.Error("expected found, got not found")
+		if p.Sick.Len() > 0 {
+			queue = "sick"
+		}
+
+		if tc.q != queue {
+			t.Errorf("expected %s, got %s", tc.q, queue)
 		}
 	}
 
@@ -266,40 +273,38 @@ func TestBackendPool_Set(t *testing.T) {
 
 func TestBackendPool_Add(t *testing.T) {
 	testCases := []struct {
-		p    BackendPool
 		b    Backend
 		sick bool
 	}{
 		{
-			p: BackendPool{},
 			b: Backend{
+				URL: &url.URL{Path: "/foo"},
 				Client: http.Client{
-					Transport: &testRoundTripper{},
+					Transport: &testRoundTripper{statuses: []int{http.StatusOK}},
 				},
-				Sick: false,
 			},
 			sick: false,
 		},
 		{
-			p: BackendPool{},
 			b: Backend{
+				URL: &url.URL{Path: "/foo"},
 				Client: http.Client{
-					Transport: &testRoundTripper{},
+					Transport: &testRoundTripper{statuses: []int{http.StatusInternalServerError}},
 				},
-				Sick: true,
 			},
 			sick: true,
 		},
 	}
 
 	for _, tc := range testCases {
-		tc.p.Add(&tc.b)
+		var p BackendPool
+		p.Add(&tc.b)
 
 		var l *list.List
 		if tc.sick {
-			l = &tc.p.Sick
+			l = &p.Sick
 		} else {
-			l = &tc.p.Healthy
+			l = &p.Healthy
 		}
 
 		var found bool
@@ -423,12 +428,12 @@ func TestBackendPool_Run(t *testing.T) {
 		var p BackendPool
 
 		for _, b := range tc.beforeHealthy {
-			b.Sick = false
+			b.Client = http.Client{Transport: &testRoundTripper{statuses: []int{http.StatusOK}}}
 			p.Add(b)
 		}
 
 		for _, b := range tc.beforeSick {
-			b.Sick = true
+			b.Client = http.Client{Transport: &testRoundTripper{statuses: []int{http.StatusInternalServerError}}}
 			p.Add(b)
 		}
 
@@ -458,8 +463,8 @@ func TestBackendPool_Run(t *testing.T) {
 			}
 
 			for j, h := range tc.afterHealthy {
-				if h != healthy[j] {
-					t.Errorf("(%d, %d) expected: %#v, got: %#v", i, j, h, healthy[j])
+				if h.URL.String() != healthy[j].URL.String() {
+					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, h.URL, healthy[j].URL)
 				}
 			}
 		}
@@ -475,8 +480,8 @@ func TestBackendPool_Run(t *testing.T) {
 			}
 
 			for j, s := range tc.afterSick {
-				if s != sick[j] {
-					t.Errorf("(%d, %d) expected: %#v, got: %#v", i, j, s, sick[j])
+				if s.URL.String() != sick[j].URL.String() {
+					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, s.URL, sick[j].URL)
 				}
 			}
 		}

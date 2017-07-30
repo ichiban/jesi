@@ -85,8 +85,9 @@ func (b *Backend) String() string {
 // Run keeps probing the backend to keep its state updated.
 // When state changed, it notifies ch.
 func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
-	log.Printf("run: %s", b)
-	defer log.Printf("done: %s", b)
+	log.WithFields(log.Fields{
+		"backend": b,
+	}).Debug("Started probing for a backend")
 
 	if b.Interval == 0 {
 		b.Interval = 10 * time.Second
@@ -97,7 +98,11 @@ func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
 	for {
 		t := b.Timer
 		if t == nil {
-			log.Printf("probe after: %s", b.Interval)
+			log.WithFields(log.Fields{
+				"backend":  b,
+				"interval": b.Interval,
+			}).Debug("Will prove a backend after an interval")
+
 			t = time.After(b.Interval)
 		}
 
@@ -109,6 +114,10 @@ func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
 				ch <- b
 			}
 		case <-q:
+			log.WithFields(log.Fields{
+				"backend": b,
+			}).Debug("Finished probing for a backend")
+
 			return
 		}
 	}
@@ -116,16 +125,25 @@ func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
 
 // Probe makes a probing request to the background and changes its internal state accordingly.
 func (b *Backend) Probe() {
-	log.Printf("probe: %s", b)
+	log.WithFields(log.Fields{
+		"backend": b,
+	}).Debug("Started a probe into a backend")
 
 	resp, err := b.Get(b.URL.String())
 	if err != nil {
-		log.Printf("error response from backend: %s", b)
+		log.WithFields(log.Fields{
+			"backend": b,
+			"error":   err,
+		}).Debug("Couldn't get a response from a backend")
+
 		b.Sick = true
 		return
 	}
 
-	log.Printf("status code: %d from backend: %s", resp.StatusCode, b)
+	log.WithFields(log.Fields{
+		"backend": b,
+		"status":  resp.StatusCode,
+	}).Debug("Got a response from a backend")
 
 	b.Sick = resp.StatusCode >= 400
 }
@@ -138,6 +156,8 @@ type BackendPool struct {
 	Quit    chan struct{}
 	Healthy list.List
 	Sick    list.List
+
+	http.RoundTripper
 }
 
 var _ flag.Value = (*BackendPool)(nil)
@@ -166,7 +186,12 @@ func (p *BackendPool) Set(str string) error {
 		return err
 	}
 
-	p.Add(&Backend{URL: uri})
+	b := &Backend{URL: uri}
+	if p.RoundTripper != nil {
+		b.Client.Transport = p.RoundTripper
+	}
+
+	p.Add(b)
 
 	return nil
 }
@@ -185,10 +210,22 @@ func (p *BackendPool) Add(b *Backend) {
 		p.Quit = make(chan struct{})
 	}
 
+	b.Probe()
+
 	if b.Sick {
 		b.Element = p.Sick.PushBack(b)
+
+		log.WithFields(log.Fields{
+			"backend": b,
+			"queue":   "sick",
+		}).Info("Added a backend")
 	} else {
 		b.Element = p.Healthy.PushBack(b)
+
+		log.WithFields(log.Fields{
+			"backend": b,
+			"queue":   "healthy",
+		}).Info("Added a backend")
 	}
 
 	go b.Run(p.Changed, p.Quit)
@@ -219,21 +256,32 @@ func (p *BackendPool) Run(ch chan struct{}) {
 	for {
 		select {
 		case b := <-p.Changed:
-			log.Printf("backend: %s, sick: %t", b, b.Sick)
+			log.WithFields(log.Fields{
+				"backend": b,
+				"sick":    b.Sick,
+			}).Debug("Detected a change of a backend's status")
 
 			p.Lock()
 			if b.Sick {
 				b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
+
+				log.WithFields(log.Fields{
+					"backend": b,
+					"queue":   "sick",
+				}).Info("Pushed back a backend to a queue")
 			} else {
 				b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
+
+				log.WithFields(log.Fields{
+					"backend": b,
+					"queue":   "healthy",
+				}).Info("Pushed back a backend to a queue")
 			}
 			p.Unlock()
 
 			if ch != nil {
 				ch <- struct{}{}
 			}
-
-			log.Printf("backend pool: %s", p)
 		case <-ch:
 			if p.Quit != nil {
 				close(p.Quit)

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/cache"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -133,24 +133,24 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		}
 		e := Handler{Next: th}
 
-		var resp common.ResponseBuffer
-		e.ServeHTTP(&resp, req)
+		var rep cache.Representation
+		e.ServeHTTP(&rep, req)
 
-		if http.StatusOK != resp.StatusCode {
-			t.Errorf("(%d) expected 200, got %d, %s", i, resp.StatusCode, req.URL)
+		if http.StatusOK != rep.StatusCode {
+			t.Errorf("(%d) expected 200, got %d, %s", i, rep.StatusCode, req.URL)
 		}
 
 		for k, vs := range tc.header {
 			for i, v := range vs {
-				if v != resp.HeaderMap[k][i] {
-					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, resp.HeaderMap[k][i])
+				if v != rep.HeaderMap[k][i] {
+					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, rep.HeaderMap[k][i])
 				}
 
 			}
 		}
 
-		if tc.body != string(resp.Body) {
-			t.Errorf("(%d) expected: %s, got: %s", i, tc.body, string(resp.Body))
+		if tc.body != string(rep.Body) {
+			t.Errorf("(%d) expected: %s, got: %s", i, tc.body, string(rep.Body))
 		}
 	}
 }

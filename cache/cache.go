@@ -10,27 +10,26 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ichiban/jesi/common"
 	log "github.com/sirupsen/logrus"
 )
 
 // Cache stores pairs of requests/responses.
 type Cache struct {
 	sync.RWMutex
-	URLVars         map[URLKey]*Variations
+	Resource        map[ResourceKey]*Resource
 	History         *list.List
 	Max             uint64
 	OriginChangedAt time.Time
 }
 
 // Set inserts/updates a new pair of request/response to the cache.
-func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
+func (c *Cache) Set(req *http.Request, cached *Representation) {
 	c.init()
 
 	c.Lock()
 	defer c.Unlock()
 
-	urlKey := NewURLKey(req)
+	urlKey := NewResourceKey(req)
 	log.WithFields(log.Fields{
 		"method": urlKey.Method,
 		"host":   urlKey.Host,
@@ -38,18 +37,18 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 		"query":  urlKey.Query,
 	}).Debug("Will set a set of variations to a URL key")
 
-	variations, ok := c.URLVars[urlKey]
+	variations, ok := c.Resource[urlKey]
 	if !ok {
-		variations = NewVariations(cached)
-		c.URLVars[urlKey] = variations
+		variations = NewResource(cached)
+		c.Resource[urlKey] = variations
 	}
 
-	varKey := NewVarKey(variations, req)
+	varKey := NewRepresentationKey(variations, req)
 	log.WithFields(log.Fields{
 		"variation": varKey,
 	}).Debug("Will set a cached response to a variation key")
 
-	if old, ok := variations.VarResponse[varKey]; ok && old.Element != nil {
+	if old, ok := variations.Representations[varKey]; ok && old.Element != nil {
 		c.History.Remove(old.Element)
 
 		log.WithFields(log.Fields{
@@ -60,8 +59,8 @@ func (c *Cache) Set(req *http.Request, cached *CachedResponse) {
 			"variation": varKey,
 		}).Debug("Removed an old cached response from the history")
 	}
-	variations.VarResponse[varKey] = cached
-	cached.Element = c.History.PushFront(key{primary: urlKey, secondary: varKey})
+	variations.Representations[varKey] = cached
+	cached.Element = c.History.PushFront(key{resource: urlKey, representation: varKey})
 
 	if c.Max == 0 {
 		return
@@ -94,43 +93,43 @@ func (c *Cache) evictLRU() {
 	k := e.Value.(key)
 
 	log.WithFields(log.Fields{
-		"method":    k.primary.Method,
-		"host":      k.primary.Host,
-		"path":      k.primary.Path,
-		"query":     k.primary.Query,
-		"variation": k.secondary,
+		"method":    k.resource.Method,
+		"host":      k.resource.Host,
+		"path":      k.resource.Path,
+		"query":     k.resource.Query,
+		"variation": k.representation,
 	}).Debug("Will evict a key from the cache")
 
-	pe, ok := c.URLVars[k.primary]
+	pe, ok := c.Resource[k.resource]
 	if !ok {
 		return
 	}
 
-	if _, ok = pe.VarResponse[k.secondary]; ok {
-		delete(pe.VarResponse, k.secondary)
+	if _, ok = pe.Representations[k.representation]; ok {
+		delete(pe.Representations, k.representation)
 	}
 
-	if len(pe.VarResponse) == 0 {
-		delete(c.URLVars, k.primary)
+	if len(pe.Representations) == 0 {
+		delete(c.Resource, k.resource)
 	}
 
 	log.WithFields(log.Fields{
-		"method":    k.primary.Method,
-		"host":      k.primary.Host,
-		"path":      k.primary.Path,
-		"query":     k.primary.Query,
-		"variation": k.secondary,
+		"method":    k.resource.Method,
+		"host":      k.resource.Host,
+		"path":      k.resource.Path,
+		"query":     k.resource.Query,
+		"variation": k.representation,
 	}).Info("Evicted a key from the cache")
 }
 
 // Get retrieves a cached response.
-func (c *Cache) Get(req *http.Request) *CachedResponse {
+func (c *Cache) Get(req *http.Request) *Representation {
 	c.init()
 
 	c.RLock()
 	defer c.RUnlock()
 
-	pKey := NewURLKey(req)
+	pKey := NewResourceKey(req)
 	log.WithFields(log.Fields{
 		"method": pKey.Method,
 		"host":   pKey.Host,
@@ -138,7 +137,7 @@ func (c *Cache) Get(req *http.Request) *CachedResponse {
 		"query":  pKey.Query,
 	}).Debug("Will get a set of variations for a URL key")
 
-	pe, ok := c.URLVars[pKey]
+	pe, ok := c.Resource[pKey]
 	if !ok {
 		log.WithFields(log.Fields{
 			"method": pKey.Method,
@@ -150,12 +149,12 @@ func (c *Cache) Get(req *http.Request) *CachedResponse {
 		return nil
 	}
 
-	sKey := NewVarKey(pe, req)
+	sKey := NewRepresentationKey(pe, req)
 	log.WithFields(log.Fields{
 		"variation": sKey,
 	}).Debug("Will get a cached response for a variation key")
 
-	cached, ok := pe.VarResponse[sKey]
+	cached, ok := pe.Representations[sKey]
 	if !ok {
 		log.WithFields(log.Fields{
 			"method":    pKey.Method,
@@ -188,15 +187,15 @@ func (c *Cache) Get(req *http.Request) *CachedResponse {
 		"variation": sKey,
 	}).Debug("Got a cached response for the key")
 
-	return cached
+	return cached.clone()
 }
 
 func (c *Cache) init() {
 	c.Lock()
 	defer c.Unlock()
 
-	if c.URLVars == nil {
-		c.URLVars = make(map[URLKey]*Variations)
+	if c.Resource == nil {
+		c.Resource = make(map[ResourceKey]*Resource)
 	}
 
 	if c.History == nil {
@@ -204,17 +203,17 @@ func (c *Cache) init() {
 	}
 }
 
-// URLKey identifies cached responses with the same URL.
-type URLKey struct {
+// ResourceKey identifies resources with the same URL.
+type ResourceKey struct {
 	Method string
 	Host   string
 	Path   string
 	Query  string
 }
 
-// NewURLKey returns a primary key of the request.
-func NewURLKey(req *http.Request) URLKey {
-	return URLKey{
+// NewResourceKey returns a resource key of the request.
+func NewResourceKey(req *http.Request) ResourceKey {
+	return ResourceKey{
 		Method: req.Method,
 		Host:   req.URL.Host,
 		Path:   req.URL.Path,
@@ -222,17 +221,17 @@ func NewURLKey(req *http.Request) URLKey {
 	}
 }
 
-// Variations represents cached responses with the same URL.
-type Variations struct {
-	Fields      []string
-	VarResponse map[VarKey]*CachedResponse
+// Resource represents cached responses with the same URL.
+type Resource struct {
+	Fields          []string
+	Representations map[RepresentationKey]*Representation
 }
 
-// NewVariations constructs a new variations for the cached response.
-func NewVariations(resp *CachedResponse) *Variations {
+// NewResource constructs a new variations for the cached response.
+func NewResource(rep *Representation) *Resource {
 	var fields []string
 
-	for _, vary := range resp.Header["Vary"] {
+	for _, vary := range rep.HeaderMap["Vary"] {
 		for _, field := range strings.Split(vary, ",") {
 			if field == "*" {
 				return nil
@@ -241,19 +240,19 @@ func NewVariations(resp *CachedResponse) *Variations {
 		}
 	}
 
-	return &Variations{
-		Fields:      fields,
-		VarResponse: make(map[VarKey]*CachedResponse),
+	return &Resource{
+		Fields:          fields,
+		Representations: make(map[RepresentationKey]*Representation),
 	}
 }
 
-// VarKey identifies a cached response in variations.
-type VarKey string
+// RepresentationKey identifies a cached response in variations.
+type RepresentationKey string
 
-// NewVarKey constructs a new variation key from a request.
-func NewVarKey(pe *Variations, req *http.Request) VarKey {
+// NewRepresentationKey constructs a new variation key from a request.
+func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 	var keys []string
-	for _, fields := range pe.Fields {
+	for _, fields := range res.Fields {
 		fields := strings.Split(fields, ",")
 		for _, field := range fields {
 			keys = append(keys, strings.Trim(field, " "))
@@ -276,41 +275,12 @@ func NewVarKey(pe *Variations, req *http.Request) VarKey {
 		}
 	}
 
-	return VarKey(vals.Encode())
-}
-
-// CachedResponse represents a cached HTTP response.
-type CachedResponse struct {
-	sync.RWMutex
-	Header       http.Header
-	Body         []byte
-	RequestTime  time.Time
-	ResponseTime time.Time
-	Element      *list.Element
-}
-
-// NewCachedResponse constructs a new cached response.
-func NewCachedResponse(resp *common.ResponseBuffer, reqTime, respTime time.Time) (*CachedResponse, error) {
-	return &CachedResponse{
-		Header:       resp.HeaderMap,
-		Body:         resp.Body,
-		RequestTime:  reqTime,
-		ResponseTime: respTime,
-	}, nil
-}
-
-// Response converts a cached response to an HTTP response.
-func (e *CachedResponse) Response() *common.ResponseBuffer {
-	return &common.ResponseBuffer{
-		StatusCode: http.StatusOK,
-		HeaderMap:  e.Header,
-		Body:       e.Body,
-	}
+	return RepresentationKey(vals.Encode())
 }
 
 type key struct {
-	primary   URLKey
-	secondary VarKey
+	resource       ResourceKey
+	representation RepresentationKey
 }
 
 // CachedState represents freshness of a cached response.
@@ -331,7 +301,7 @@ const (
 )
 
 // State returns the state of cached response.
-func (c *Cache) State(req *http.Request, cached *CachedResponse) (CachedState, time.Duration) {
+func (c *Cache) State(req *http.Request, cached *Representation) (CachedState, time.Duration) {
 	if cached == nil {
 		return Miss, time.Duration(0)
 	}
@@ -347,7 +317,7 @@ func (c *Cache) State(req *http.Request, cached *CachedResponse) (CachedState, t
 		return Revalidate, time.Duration(0)
 	}
 
-	if contains(cached.Header, cacheControlField, noStore) {
+	if contains(cached.HeaderMap, cacheControlField, noStore) {
 		return Revalidate, time.Duration(0)
 	}
 
@@ -364,7 +334,7 @@ func (c *Cache) State(req *http.Request, cached *CachedResponse) (CachedState, t
 			return Fresh, delta
 		}
 
-		if contains(cached.Header, cacheControlField, revalidatePattern) {
+		if contains(cached.HeaderMap, cacheControlField, revalidatePattern) {
 			return Revalidate, time.Duration(0)
 		}
 

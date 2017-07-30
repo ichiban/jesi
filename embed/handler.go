@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/cache"
 	"github.com/ichiban/jesi/request"
 	log "github.com/sirupsen/logrus"
 )
@@ -46,10 +46,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	spec := stripSpec(r)
 
-	var resp common.ResponseBuffer
-	h.Next.ServeHTTP(&resp, r)
+	var rep cache.Representation
+	h.Next.ServeHTTP(&rep, r)
 	defer func() {
-		if _, err := resp.WriteTo(w); err != nil {
+		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
 				"request": request.ID(r),
 				"error":   err,
@@ -57,37 +57,37 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if !jsonPattern.MatchString(resp.HeaderMap.Get(contentTypeField)) {
+	if !jsonPattern.MatchString(rep.HeaderMap.Get(contentTypeField)) {
 		return
 	}
 
 	var data map[string]interface{}
-	if err := json.Unmarshal(resp.Body, &data); err != nil {
+	if err := json.Unmarshal(rep.Body, &data); err != nil {
 		return
 	}
 
 	res := &resource{
-		cacheControl: NewCacheControl(&resp),
+		cacheControl: NewCacheControl(&rep),
 		data:         data,
 	}
 	h.embed(r, res, spec)
 
-	delete(resp.HeaderMap, expires)
-	resp.HeaderMap[cacheControl] = []string{res.cacheControl.String()}
+	delete(rep.HeaderMap, expires)
+	rep.HeaderMap[cacheControl] = []string{res.cacheControl.String()}
 
 	var err error
-	resp.Body, err = json.Marshal(res.data)
+	rep.Body, err = json.Marshal(res.data)
 	if err != nil {
 		return
 	}
 
 	ha := md5.New() // #nosec
-	_, _ = ha.Write(resp.Body)
+	_, _ = ha.Write(rep.Body)
 	etag := fmt.Sprintf(`W/"%s"`, hex.EncodeToString(ha.Sum(nil)))
-	resp.HeaderMap[etagField] = []string{etag}
+	rep.HeaderMap[etagField] = []string{etag}
 
-	if _, ok := resp.HeaderMap[warningField]; !ok {
-		resp.HeaderMap.Set(warningField, `214 - "Transformation Applied"`)
+	if _, ok := rep.HeaderMap[warningField]; !ok {
+		rep.HeaderMap.Set(warningField, `214 - "Transformation Applied"`)
 	}
 
 	log.WithFields(log.Fields{
@@ -204,7 +204,7 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		"parent":  request.ID(base),
 	}).Info("Started a subrequest")
 
-	var resp common.ResponseBuffer
+	var resp cache.Representation
 	h.Next.ServeHTTP(&resp, req)
 
 	if !resp.Successful() {

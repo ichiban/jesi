@@ -16,7 +16,7 @@ func TestCache_Get(t *testing.T) {
 		cache *Cache
 		req   *http.Request
 
-		resp *CachedResponse
+		rep *Representation
 	}{
 		{ // when it's not cached
 			cache: &Cache{},
@@ -25,13 +25,13 @@ func TestCache_Get(t *testing.T) {
 				URL:    url,
 			},
 
-			resp: nil,
+			rep: nil,
 		},
 		{ // when it's cached
 			cache: &Cache{
-				URLVars: map[URLKey]*Variations{
-					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
-						VarResponse: map[VarKey]*CachedResponse{
+				Resource: map[ResourceKey]*Resource{
+					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+						Representations: map[RepresentationKey]*Representation{
 							"": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -44,17 +44,17 @@ func TestCache_Get(t *testing.T) {
 				URL:    url,
 			},
 
-			resp: &CachedResponse{
-				Header: http.Header{},
-				Body:   []byte(`{"foo":"bar"}`),
+			rep: &Representation{
+				HeaderMap: http.Header{},
+				Body:      []byte(`{"foo":"bar"}`),
 			},
 		},
-		{ // when it's cached and also the secondary key matches
+		{ // when it's cached and also the representation key matches
 			cache: &Cache{
-				URLVars: map[URLKey]*Variations{
-					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+				Resource: map[ResourceKey]*Resource{
+					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						VarResponse: map[VarKey]*CachedResponse{
+						Representations: map[RepresentationKey]*Representation{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -71,17 +71,17 @@ func TestCache_Get(t *testing.T) {
 				},
 			},
 
-			resp: &CachedResponse{
-				Header: http.Header{},
-				Body:   []byte(`{"foo":"bar"}`),
+			rep: &Representation{
+				HeaderMap: http.Header{},
+				Body:      []byte(`{"foo":"bar"}`),
 			},
 		},
-		{ // when it's cached but the secondary key doesn't match
+		{ // when it's cached but the representation key doesn't match
 			cache: &Cache{
-				URLVars: map[URLKey]*Variations{
-					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+				Resource: map[ResourceKey]*Resource{
+					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						VarResponse: map[VarKey]*CachedResponse{
+						Representations: map[RepresentationKey]*Representation{
 							"Accept=application%2Fjson&Accept-Language=ja-JP": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -98,13 +98,13 @@ func TestCache_Get(t *testing.T) {
 				},
 			},
 
-			resp: nil,
+			rep: nil,
 		},
 		{ // when it's cached but the method doesn't match
 			cache: &Cache{
-				URLVars: map[URLKey]*Variations{
-					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
-						VarResponse: map[VarKey]*CachedResponse{
+				Resource: map[ResourceKey]*Resource{
+					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+						Representations: map[RepresentationKey]*Representation{
 							"": {
 								Body: []byte(`{"foo":"bar"}`),
 							},
@@ -117,40 +117,40 @@ func TestCache_Get(t *testing.T) {
 				URL:    url,
 			},
 
-			resp: nil,
+			rep: nil,
 		},
 	}
 
 	for _, tc := range testCases {
-		resp := tc.cache.Get(tc.req)
+		rep := tc.cache.Get(tc.req)
 
-		if tc.resp == nil && resp != nil {
-			t.Errorf("expected nil, got %#v", resp)
+		if tc.rep == nil && rep != nil {
+			t.Errorf("expected nil, got %#v", rep)
 			continue
 		}
 
-		if tc.resp != nil && resp == nil {
+		if tc.rep != nil && rep == nil {
 			t.Error("expected non-nil, got nil")
 			continue
 		}
 
-		if tc.resp == nil && resp == nil {
+		if tc.rep == nil && rep == nil {
 			continue
 		}
 
-		for k := range tc.resp.Header {
-			if len(tc.resp.Header) != len(resp.Header) {
-				t.Errorf("expected %d, got %d", len(tc.resp.Header), len(resp.Header))
+		for k := range tc.rep.HeaderMap {
+			if len(tc.rep.HeaderMap) != len(rep.HeaderMap) {
+				t.Errorf("expected %d, got %d", len(tc.rep.HeaderMap), len(rep.HeaderMap))
 			}
-			for i := 0; i < len(tc.resp.Header); i++ {
-				if tc.resp.Header[k][i] != resp.Header[k][i] {
-					t.Errorf("for header %s, expected %#v, got %#v", k, tc.resp.Header[k][i], resp.Header[k][i])
+			for i := 0; i < len(tc.rep.HeaderMap); i++ {
+				if tc.rep.HeaderMap[k][i] != rep.HeaderMap[k][i] {
+					t.Errorf("for header %s, expected %#v, got %#v", k, tc.rep.HeaderMap[k][i], rep.HeaderMap[k][i])
 				}
 			}
 		}
 
-		if string(tc.resp.Body) != string(resp.Body) {
-			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(resp.Body))
+		if string(tc.rep.Body) != string(rep.Body) {
+			t.Errorf("expected %#v, got %#v", string(tc.rep.Body), string(rep.Body))
 		}
 	}
 }
@@ -164,10 +164,10 @@ func TestCache_Set(t *testing.T) {
 	testCases := []struct {
 		cache *Cache
 		req   *http.Request
-		resp  *CachedResponse
+		rep   *Representation
 
-		primary   URLKey
-		secondary VarKey
+		primary   ResourceKey
+		secondary RepresentationKey
 	}{
 		{ // when there's no entry for the request (insert)
 			cache: &Cache{},
@@ -175,18 +175,18 @@ func TestCache_Set(t *testing.T) {
 				Method: http.MethodGet,
 				URL:    url,
 			},
-			resp: &CachedResponse{
+			rep: &Representation{
 				Body: []byte{},
 			},
 
-			primary:   URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
+			primary:   ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
 			secondary: "",
 		},
 		{ // when there's an existing entry for the request (replace)
 			cache: &Cache{
-				URLVars: map[URLKey]*Variations{
-					URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
-						VarResponse: map[VarKey]*CachedResponse{
+				Resource: map[ResourceKey]*Resource{
+					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+						Representations: map[RepresentationKey]*Representation{
 							"": {},
 						},
 					},
@@ -196,11 +196,11 @@ func TestCache_Set(t *testing.T) {
 				Method: http.MethodGet,
 				URL:    url,
 			},
-			resp: &CachedResponse{
+			rep: &Representation{
 				Body: []byte{},
 			},
 
-			primary:   URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
+			primary:   ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
 			secondary: "",
 		},
 		{ // when there's Vary header field
@@ -213,50 +213,44 @@ func TestCache_Set(t *testing.T) {
 					"Accept-Language": []string{"ja-JP"},
 				},
 			},
-			resp: &CachedResponse{
+			rep: &Representation{
 				Body: []byte{},
-				Header: http.Header{
+				HeaderMap: http.Header{
 					"Vary": []string{"Accept", "Accept-Language"},
 				},
 			},
 
-			primary:   URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
+			primary:   ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"},
 			secondary: "Accept=application%2Fjson&Accept-Language=ja-JP",
 		},
 	}
 
 	for _, tc := range testCases {
-		tc.cache.Set(tc.req, tc.resp)
+		tc.cache.Set(tc.req, tc.rep)
 
-		pe, ok := tc.cache.URLVars[tc.primary]
+		pe, ok := tc.cache.Resource[tc.primary]
 		if !ok {
 			t.Errorf("expected cache to have an entry for %#v but not", tc.primary)
 		}
 
-		result, ok := pe.VarResponse[tc.secondary]
+		rep, ok := pe.Representations[tc.secondary]
 		if !ok {
-			t.Errorf("expected %#v to have a response for %#v but not", pe, tc.secondary)
+			t.Errorf("expected %#v to have a reponse for %#v but not", pe, tc.secondary)
 		}
 
-		resp := result.Response()
-
-		if http.StatusOK != resp.StatusCode {
-			t.Errorf("expected %d, got %d", http.StatusOK, resp.StatusCode)
-		}
-
-		for k := range tc.resp.Header {
-			if len(tc.resp.Header) != len(resp.HeaderMap) {
-				t.Errorf("expected %d, got %d", len(tc.resp.Header), len(resp.HeaderMap))
+		for k := range tc.rep.HeaderMap {
+			if len(tc.rep.HeaderMap) != len(rep.HeaderMap) {
+				t.Errorf("expected %d, got %d", len(tc.rep.HeaderMap), len(rep.HeaderMap))
 			}
-			for i := 0; i < len(tc.resp.Header[k]); i++ {
-				if tc.resp.Header[k][i] != resp.HeaderMap[k][i] {
-					t.Errorf("for header %s, expected %#v, got %#v", k, tc.resp.Header[k][i], resp.HeaderMap[k][i])
+			for i := 0; i < len(tc.rep.HeaderMap[k]); i++ {
+				if tc.rep.HeaderMap[k][i] != rep.HeaderMap[k][i] {
+					t.Errorf("for header %s, expected %#v, got %#v", k, tc.rep.HeaderMap[k][i], rep.HeaderMap[k][i])
 				}
 			}
 		}
 
-		if string(tc.resp.Body) != string(resp.Body) {
-			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(resp.Body))
+		if string(tc.rep.Body) != string(rep.Body) {
+			t.Errorf("expected %#v, got %#v", string(tc.rep.Body), string(rep.Body))
 		}
 
 		if tc.cache.History.Len() != 1 {
@@ -264,11 +258,11 @@ func TestCache_Set(t *testing.T) {
 		}
 
 		k := tc.cache.History.Front().Value.(key)
-		if tc.primary != k.primary {
-			t.Errorf("expected %v, got %v", tc.primary, k.primary)
+		if tc.primary != k.resource {
+			t.Errorf("expected %v, got %v", tc.primary, k.resource)
 		}
-		if tc.secondary != k.secondary {
-			t.Errorf("expected %v, got %v", tc.primary, k.primary)
+		if tc.secondary != k.representation {
+			t.Errorf("expected %v, got %v", tc.primary, k.resource)
 		}
 	}
 }

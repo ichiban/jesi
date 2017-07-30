@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/ichiban/jesi/common"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -20,13 +18,13 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
 		handler *Handler
 		req     *http.Request
-		resp    *common.ResponseBuffer
+		rep     *Representation
 		cached  bool
 	}{
 		{ // fetch from backend and cache
 			handler: &Handler{
 				Next: &testHandler{
-					Resources: map[string]*common.ResponseBuffer{
+					Resources: map[string]*Representation{
 						"http://www.example.com/test": {
 							StatusCode: http.StatusOK,
 							HeaderMap: http.Header{
@@ -42,7 +40,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Header: http.Header{},
 				URL:    url,
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"public"},
@@ -54,7 +52,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		{ // fetch from backend and don't cache
 			handler: &Handler{
 				Next: &testHandler{
-					Resources: map[string]*common.ResponseBuffer{
+					Resources: map[string]*Representation{
 						"http://www.example.com/test": {
 							StatusCode: http.StatusOK,
 							HeaderMap: http.Header{
@@ -70,7 +68,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Header: http.Header{},
 				URL:    url,
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"private"},
@@ -83,11 +81,12 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			handler: &Handler{
 				Next: &testHandler{},
 				Cache: Cache{
-					URLVars: map[URLKey]*Variations{
-						URLKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
-							VarResponse: map[VarKey]*CachedResponse{
+					Resource: map[ResourceKey]*Resource{
+						ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+							Representations: map[RepresentationKey]*Representation{
 								"": {
-									Header: http.Header{
+									StatusCode: http.StatusOK,
+									HeaderMap: http.Header{
 										"Cache-Control": []string{"s-maxage=600"},
 									},
 									Body:         []byte(`{"foo":"bar"}`),
@@ -104,7 +103,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Header: http.Header{},
 				URL:    url,
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap:  http.Header{},
 				Body:       []byte(`{"foo":"bar"}`),
@@ -114,26 +113,26 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		var resp common.ResponseBuffer
-		tc.handler.ServeHTTP(&resp, tc.req)
+		var rep Representation
+		tc.handler.ServeHTTP(&rep, tc.req)
 
-		if tc.resp.StatusCode != resp.StatusCode {
-			t.Errorf("expected %d, got %d", tc.resp.StatusCode, resp.StatusCode)
+		if tc.rep.StatusCode != rep.StatusCode {
+			t.Errorf("expected %d, got %d", tc.rep.StatusCode, rep.StatusCode)
 		}
 
-		for k := range tc.resp.HeaderMap {
-			if len(tc.resp.HeaderMap[k]) != len(resp.HeaderMap[k]) {
-				t.Errorf("expected %d, got %d", len(tc.resp.HeaderMap), len(resp.HeaderMap))
+		for k := range tc.rep.HeaderMap {
+			if len(tc.rep.HeaderMap[k]) != len(rep.HeaderMap[k]) {
+				t.Errorf("expected %d, got %d", len(tc.rep.HeaderMap), len(rep.HeaderMap))
 			}
-			for i := range tc.resp.HeaderMap[k] {
-				if tc.resp.HeaderMap[k][i] != resp.HeaderMap[k][i] {
-					t.Errorf("for header %s, expected %#v, got %#v", k, tc.resp.HeaderMap[k][i], resp.HeaderMap[k][i])
+			for i := range tc.rep.HeaderMap[k] {
+				if tc.rep.HeaderMap[k][i] != rep.HeaderMap[k][i] {
+					t.Errorf("for header %s, expected %#v, got %#v", k, tc.rep.HeaderMap[k][i], rep.HeaderMap[k][i])
 				}
 			}
 		}
 
-		if string(tc.resp.Body) != string(resp.Body) {
-			t.Errorf("expected %#v, got %#v", string(tc.resp.Body), string(resp.Body))
+		if string(tc.rep.Body) != string(rep.Body) {
+			t.Errorf("expected %#v, got %#v", string(tc.rep.Body), string(rep.Body))
 		}
 
 		cached := tc.handler.Get(tc.req)
@@ -157,7 +156,7 @@ func TestCacheable(t *testing.T) {
 
 	testCases := []struct {
 		req    *http.Request
-		resp   *common.ResponseBuffer
+		rep    *Representation
 		result bool
 	}{
 		{ // Non-GET requests are not cacheable.
@@ -167,7 +166,7 @@ func TestCacheable(t *testing.T) {
 				Header: http.Header{},
 				Body:   ioutil.NopCloser(strings.NewReader(`{"foo":"bar"}`)),
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusCreated,
 				HeaderMap: http.Header{
 					"Expires":  []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
@@ -176,13 +175,13 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // Non-OK responses are not cacheable.
+		{ // Non-OK reponses are not cacheable.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusNotFound,
 				HeaderMap: http.Header{
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
@@ -198,7 +197,7 @@ func TestCacheable(t *testing.T) {
 					"Cache-Control": []string{"no-store"},
 				},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
@@ -207,13 +206,13 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // "no-store" responses are not cacheable.
+		{ // "no-store" reponses are not cacheable.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"no-store"},
@@ -223,13 +222,13 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // "private" responses are not cacheable.
+		{ // "private" reponses are not cacheable.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"private"},
@@ -239,7 +238,7 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // Requests with Authorization header are not cacheable without an explicit cacheable response.
+		{ // Requests with Authorization header are not cacheable without an explicit cacheable reponse.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -247,7 +246,7 @@ func TestCacheable(t *testing.T) {
 					"Authorization": []string{""},
 				},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
@@ -256,7 +255,7 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // Requests with Authorization header are cacheable with an explicit cacheable response.
+		{ // Requests with Authorization header are cacheable with an explicit cacheable reponse.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -264,7 +263,7 @@ func TestCacheable(t *testing.T) {
 					"Authorization": []string{""},
 				},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"public"},
@@ -280,7 +279,7 @@ func TestCacheable(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
@@ -295,7 +294,7 @@ func TestCacheable(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"max-age=600"},
@@ -311,7 +310,7 @@ func TestCacheable(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"s-maxage=600"},
@@ -327,7 +326,7 @@ func TestCacheable(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			resp: &common.ResponseBuffer{
+			rep: &Representation{
 				StatusCode: http.StatusOK,
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"public"},
@@ -340,7 +339,7 @@ func TestCacheable(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		result := Cacheable(tc.req, tc.resp)
+		result := Cacheable(tc.req, tc.rep)
 		if tc.result != result {
 			t.Errorf("(%d) expected %#v, got %#v", i, tc.result, result)
 		}
@@ -358,7 +357,7 @@ func TestHandler_State(t *testing.T) {
 	testCases := []struct {
 		originChangedAt time.Time
 		req             *http.Request
-		cached          *CachedResponse
+		cached          *Representation
 
 		state CachedState
 		delta time.Duration
@@ -380,8 +379,8 @@ func TestHandler_State(t *testing.T) {
 					"Pragma": []string{"no-cache"},
 				},
 			},
-			cached: &CachedResponse{
-				Header:       http.Header{},
+			cached: &Representation{
+				HeaderMap:    http.Header{},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
 				ResponseTime: now.Add(-1 * time.Second),
@@ -397,8 +396,8 @@ func TestHandler_State(t *testing.T) {
 					"Cache-Control": []string{"no-cache"},
 				},
 			},
-			cached: &CachedResponse{
-				Header:       http.Header{},
+			cached: &Representation{
+				HeaderMap:    http.Header{},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
 				ResponseTime: now.Add(-1 * time.Second),
@@ -412,8 +411,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"no-cache"},
 				},
 				Body:         []byte{},
@@ -430,8 +429,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"s-maxage=3"},
 				},
 				Body:         []byte{},
@@ -447,8 +446,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"s-maxage=3"},
 				},
 				Body:         []byte{},
@@ -464,8 +463,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"max-age=3"},
 				},
 				Body:         []byte{},
@@ -481,8 +480,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Expires": []string{now.Add(3 * time.Second).Format(time.RFC1123)},
 				},
 				Body:         []byte{},
@@ -498,8 +497,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"max-age=1, must-revalidate"},
 				},
 				Body:         []byte{},
@@ -515,8 +514,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header: http.Header{
+			cached: &Representation{
+				HeaderMap: http.Header{
 					"Cache-Control": []string{"max-age=2"},
 				},
 				Body:         []byte{},
@@ -532,8 +531,8 @@ func TestHandler_State(t *testing.T) {
 				URL:    url,
 				Header: http.Header{},
 			},
-			cached: &CachedResponse{
-				Header:       http.Header{},
+			cached: &Representation{
+				HeaderMap:    http.Header{},
 				Body:         []byte{},
 				RequestTime:  now.Add(-2 * time.Second),
 				ResponseTime: now.Add(-1 * time.Second),
@@ -559,7 +558,7 @@ func TestHandler_State(t *testing.T) {
 }
 
 type testHandler struct {
-	Resources map[string]*common.ResponseBuffer
+	Resources map[string]*Representation
 }
 
 var _ http.Handler = (*testHandler)(nil)
@@ -569,12 +568,12 @@ func (t *testHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		panic(req.Method)
 	}
 
-	resp, ok := t.Resources[req.URL.String()]
+	rep, ok := t.Resources[req.URL.String()]
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write(nil)
 		return
 	}
 
-	resp.WriteTo(w)
+	rep.WriteTo(w)
 }

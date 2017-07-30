@@ -2,11 +2,10 @@ package embed
 
 import (
 	"fmt"
+	"github.com/ichiban/jesi/cache"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/ichiban/jesi/common"
 )
 
 // CacheControl represents a response's cache policy.
@@ -35,10 +34,10 @@ const (
 )
 
 // NewCacheControl creates a new instance of CacheControl from related headers in the given HTTP response.
-func NewCacheControl(resp *common.ResponseBuffer) *CacheControl {
-	c := newCacheControlExpires(resp)
+func NewCacheControl(rep *cache.Representation) *CacheControl {
+	c := newCacheControlExpires(rep)
 
-	for _, d := range directives(resp) {
+	for _, d := range directives(rep) {
 		ts := strings.Split(d, "=")
 		switch ts[0] {
 		case mustRevalidate:
@@ -67,10 +66,10 @@ func NewCacheControl(resp *common.ResponseBuffer) *CacheControl {
 }
 
 // Convert Expires to Cache-Control: max-age
-func newCacheControlExpires(resp *common.ResponseBuffer) *CacheControl {
+func newCacheControlExpires(rep *cache.Representation) *CacheControl {
 	var c CacheControl
 
-	e, ok := resp.HeaderMap[expires]
+	e, ok := rep.HeaderMap[expires]
 	if !ok {
 		return &c
 	}
@@ -83,7 +82,7 @@ func newCacheControlExpires(resp *common.ResponseBuffer) *CacheControl {
 		return &c
 	}
 
-	d, ok := resp.HeaderMap[date]
+	d, ok := rep.HeaderMap[date]
 	if !ok {
 		return &c
 	}
@@ -101,9 +100,9 @@ func newCacheControlExpires(resp *common.ResponseBuffer) *CacheControl {
 
 // TODO: Proper directive parsing.
 // Cache-Control directives can be something like `private="foo,bar,baz"`.
-func directives(resp *common.ResponseBuffer) []string {
+func directives(rep *cache.Representation) []string {
 	ds := []string{}
-	for _, v := range resp.HeaderMap[cacheControl] {
+	for _, v := range rep.HeaderMap[cacheControl] {
 		for _, d := range strings.Split(v, ",") {
 			d = strings.Trim(d, " ")
 			ds = append(ds, d)

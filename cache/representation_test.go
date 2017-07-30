@@ -1,4 +1,4 @@
-package common
+package cache
 
 import (
 	"bytes"
@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-func TestResponseBuffer_Header(t *testing.T) {
+func TestRepresentation_Header(t *testing.T) {
 	h := http.Header{
 		"foo": []string{"bar"},
 		"baz": []string{"qux", "quux"},
 	}
-	resp := &ResponseBuffer{
+	resp := &Representation{
 		HeaderMap: h,
 	}
 
@@ -32,8 +32,8 @@ func TestResponseBuffer_Header(t *testing.T) {
 	}
 }
 
-func TestResponseBuffer_Write(t *testing.T) {
-	var resp ResponseBuffer
+func TestRepresentation_Write(t *testing.T) {
+	var resp Representation
 
 	resp.Write([]byte("foo"))
 	if "foo" != string(resp.Body) {
@@ -45,8 +45,8 @@ func TestResponseBuffer_Write(t *testing.T) {
 	}
 }
 
-func TestResponseBuffer_WriteHeader(t *testing.T) {
-	var resp ResponseBuffer
+func TestRepresentation_WriteHeader(t *testing.T) {
+	var resp Representation
 
 	resp.WriteHeader(http.StatusAccepted)
 
@@ -55,8 +55,8 @@ func TestResponseBuffer_WriteHeader(t *testing.T) {
 	}
 }
 
-func TestResponseBuffer_WriteTo(t *testing.T) {
-	resp := ResponseBuffer{
+func TestRepresentation_WriteTo(t *testing.T) {
+	resp := Representation{
 		Body: []byte("foobar"),
 	}
 	var buf bytes.Buffer
@@ -68,7 +68,7 @@ func TestResponseBuffer_WriteTo(t *testing.T) {
 	}
 }
 
-func TestResponseBuffer_Successful(t *testing.T) {
+func TestRepresentation_Successful(t *testing.T) {
 	testCases := []struct {
 		n int
 		b bool
@@ -80,7 +80,7 @@ func TestResponseBuffer_Successful(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		resp := ResponseBuffer{
+		resp := Representation{
 			StatusCode: tc.n,
 		}
 

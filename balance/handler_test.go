@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/cache"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -74,8 +74,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		h.ReverseProxy.Transport = &rt
 
 		for i := 0; i < tc.numReqs; i++ {
-			var resp common.ResponseBuffer
-			h.ServeHTTP(&resp, &http.Request{
+			var rep cache.Representation
+			h.ServeHTTP(&rep, &http.Request{
 				URL:    &tc.reqURL,
 				Header: http.Header{},
 			})

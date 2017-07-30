@@ -37,7 +37,7 @@ func main() {
 	})
 	handler = &cache.Handler{
 		Next: handler,
-		Cache: cache.Cache{
+		Store: cache.Store{
 			Max: max * 1024 * 1024,
 		},
 	}

@@ -1,13 +1,12 @@
 package conditional
 
 import (
+	"github.com/ichiban/jesi/cache"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
-
-	"github.com/ichiban/jesi/common"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
@@ -88,14 +87,14 @@ func TestHandler_ServeHTTP(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		var resp common.ResponseBuffer
-		handler.ServeHTTP(&resp, tc.req)
+		var rep cache.Representation
+		handler.ServeHTTP(&rep, tc.req)
 
-		if tc.resp.StatusCode != resp.StatusCode {
-			t.Errorf("(%d) expected: %d, got: %d", i, tc.resp.StatusCode, resp.StatusCode)
+		if tc.resp.StatusCode != rep.StatusCode {
+			t.Errorf("(%d) expected: %d, got: %d", i, tc.resp.StatusCode, rep.StatusCode)
 		}
 
-		for k, vs := range resp.HeaderMap {
+		for k, vs := range rep.HeaderMap {
 			for j, v := range vs {
 				if tc.resp.Header[k][j] != v {
 					t.Errorf("(%d) [%s] expected: %s, got: %s", i, k, tc.resp.Header[k][j], v)
@@ -108,8 +107,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			panic(err)
 		}
 
-		if string(tcb) != string(resp.Body) {
-			t.Errorf("(%d) expected: %s, got: %s", i, string(tcb), string(resp.Body))
+		if string(tcb) != string(rep.Body) {
+			t.Errorf("(%d) expected: %s, got: %s", i, string(tcb), string(rep.Body))
 		}
 	}
 }

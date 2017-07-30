@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/cache"
 )
 
 // Error represents an embedding error.
@@ -44,12 +44,12 @@ func NewMalformedSubRequestError(err error, uri fmt.Stringer) *Error {
 }
 
 // NewResponseError returns an error for a non-successful sub request response.
-func NewResponseError(resp *common.ResponseBuffer, uri fmt.Stringer) *Error {
+func NewResponseError(rep *cache.Representation, uri fmt.Stringer) *Error {
 	return &Error{
 		Type:   "https://ichiban.github.io/jesi/problems/response-error",
 		Title:  "Response Error",
-		Status: resp.StatusCode,
-		Detail: http.StatusText(resp.StatusCode),
+		Status: rep.StatusCode,
+		Detail: http.StatusText(rep.StatusCode),
 		Links: map[string]interface{}{
 			about: uri.String(),
 		},

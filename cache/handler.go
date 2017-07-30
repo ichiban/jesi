@@ -9,24 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ichiban/jesi/common"
 	"github.com/ichiban/jesi/request"
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	pragmaField          = "Pragma"
-	cacheControlField    = "Cache-Control"
-	expiresField         = "Expires"
-	authorizationField   = "Authorization"
-	dateField            = "Date"
-	ageField             = "Age"
-	warningField         = "Warning"
-	etagField            = "ETag"
-	ifNoneMatchField     = "If-None-Match"
-	lastModifiedField    = "Last-Modified"
-	ifModifiedSinceField = "If-Modified-Since"
-)
 
 var (
 	noStore                         = regexp.MustCompile(`\Ano-store\z`)
@@ -45,7 +31,7 @@ var (
 // Handler is a caching handler.
 type Handler struct {
 	Next http.Handler
-	Cache
+	Store
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -96,12 +82,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	origURL := *r.URL
 	origReq.URL = &origURL
 
-	var resp common.ResponseBuffer
-	reqTime := time.Now()
-	h.Next.ServeHTTP(&resp, r)
-	respTime := time.Now()
+	var rep Representation
+	rep.RequestTime = time.Now()
+	h.Next.ServeHTTP(&rep, r)
+	rep.ResponseTime = time.Now()
 	defer func() {
-		if _, err := resp.WriteTo(w); err != nil {
+		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
 				"request": request.ID(r),
 				"error":   err,
@@ -109,10 +95,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if !resp.Successful() {
+	if !rep.Successful() {
 		log.WithFields(log.Fields{
 			"request": request.ID(r),
-			"status":  resp.StatusCode,
+			"status":  rep.StatusCode,
 		}).Debug("Couldn't get a successful response")
 
 		if state == Stale {
@@ -120,34 +106,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"request": request.ID(r),
 			}).Debug("Will serve a stale response")
 
-			resp = *staleResponse(cached)
+			rep = *staleResponse(cached)
 		}
 		return
 	}
 
-	if originChanged(r, &resp) {
-		h.OriginChangedAt = respTime
+	if originChanged(r, &rep) {
+		h.OriginChangedAt = rep.ResponseTime
 
 		log.WithFields(log.Fields{
 			"request": request.ID(r),
-			"at":      respTime,
+			"at":      rep.ResponseTime,
 		}).Info("The origin changed")
 	}
 
-	if revalidated(state, &resp) {
+	if revalidated(state, &rep) {
 		log.WithFields(log.Fields{
 			"request": request.ID(r),
 		}).Debug("Will serve a revalidated response")
 
-		resp = *revalidatedResponse(&resp, cached)
+		rep = *revalidatedResponse(&rep, cached)
 	}
 
-	h.cacheIfPossible(&origReq, &resp, reqTime, respTime)
+	h.cacheIfPossible(&origReq, &rep)
 }
 
-func serveFresh(w io.Writer, cached *CachedResponse, r *http.Request) {
-	resp := cached.Response()
-	if _, err := resp.WriteTo(w); err != nil {
+func serveFresh(w io.Writer, cached *Representation, r *http.Request) {
+	if _, err := cached.WriteTo(w); err != nil {
 		log.WithFields(log.Fields{
 			"request": request.ID(r),
 			"error":   err,
@@ -155,7 +140,7 @@ func serveFresh(w io.Writer, cached *CachedResponse, r *http.Request) {
 	}
 }
 
-func serveStale(w io.Writer, cached *CachedResponse, r *http.Request) {
+func serveStale(w io.Writer, cached *Representation, r *http.Request) {
 	resp := staleResponse(cached)
 	if _, err := resp.WriteTo(w); err != nil {
 		log.WithFields(log.Fields{
@@ -165,19 +150,19 @@ func serveStale(w io.Writer, cached *CachedResponse, r *http.Request) {
 	}
 }
 
-func originChanged(req *http.Request, resp *common.ResponseBuffer) bool {
-	return !idempotent(req) && successful(resp)
+func originChanged(req *http.Request, rep *Representation) bool {
+	return !idempotent(req) && successful(rep)
 }
 
 func idempotent(req *http.Request) bool {
 	return req.Method == http.MethodGet || req.Method == http.MethodHead
 }
 
-func successful(resp *common.ResponseBuffer) bool {
-	return resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusBadRequest
+func successful(rep *Representation) bool {
+	return rep.StatusCode >= http.StatusOK && rep.StatusCode < http.StatusBadRequest
 }
 
-func revalidateRequest(orig *http.Request, cached *CachedResponse) *http.Request {
+func revalidateRequest(orig *http.Request, cached *Representation) *http.Request {
 	req := &http.Request{
 		Method: orig.Method,
 		URL:    orig.URL,
@@ -188,61 +173,53 @@ func revalidateRequest(orig *http.Request, cached *CachedResponse) *http.Request
 		req.Header[k] = v
 	}
 
-	if etag := cached.Header.Get(etagField); etag != "" {
+	if etag := cached.HeaderMap.Get(etagField); etag != "" {
 		req.Header.Set(ifNoneMatchField, etag)
 	}
 
-	if time := cached.Header.Get(lastModifiedField); time != "" {
+	if time := cached.HeaderMap.Get(lastModifiedField); time != "" {
 		req.Header.Set(ifModifiedSinceField, time)
 	}
 
 	return req
 }
 
-func staleResponse(cached *CachedResponse) *common.ResponseBuffer {
-	resp := cached.Response()
-	resp.HeaderMap.Set(warningField, `110 - "Response is Stale"`)
-	return resp
+func staleResponse(cached *Representation) *Representation {
+	cached.HeaderMap.Set(warningField, `110 - "Response is Stale"`)
+	return cached
 }
 
-func revalidatedResponse(resp *common.ResponseBuffer, cached *CachedResponse) *common.ResponseBuffer {
-	result := cached.Response()
-
+func revalidatedResponse(rep *Representation, cached *Representation) *Representation {
 	var warnings []string
-	for _, warning := range values(result.HeaderMap, warningField) {
+	for _, warning := range values(cached.HeaderMap, warningField) {
 		if strings.HasPrefix(warning, "2") {
 			warnings = append(warnings, warning)
 		}
 	}
-	result.HeaderMap[warningField] = warnings
+	cached.HeaderMap[warningField] = warnings
 
-	for k, v := range resp.HeaderMap {
+	for k, v := range rep.HeaderMap {
 		if k == warningField {
 			continue
 		}
-		result.HeaderMap[k] = v
+		cached.HeaderMap[k] = v
 	}
 
-	return result
+	return cached
 }
 
-func revalidated(state CachedState, resp *common.ResponseBuffer) bool {
-	return state == Revalidate && resp.StatusCode == http.StatusNotModified
+func revalidated(state CachedState, rep *Representation) bool {
+	return state == Revalidate && rep.StatusCode == http.StatusNotModified
 }
 
-func (h *Handler) cacheIfPossible(req *http.Request, resp *common.ResponseBuffer, reqTime, respTime time.Time) {
-	if !Cacheable(req, resp) {
+func (h *Handler) cacheIfPossible(req *http.Request, rep *Representation) {
+	if !Cacheable(req, rep) {
 		return
 	}
-
-	cached, err := NewCachedResponse(resp, reqTime, respTime)
-	if err != nil {
-		log.Fatal(err)
-	}
-	h.Set(req, cached)
+	h.Set(req, rep)
 }
 
-func freshnessLifetime(cached *CachedResponse) (time.Duration, bool) {
+func freshnessLifetime(cached *Representation) (time.Duration, bool) {
 	if age, ok := sMaxage(cached); ok {
 		return age, true
 	}
@@ -258,8 +235,8 @@ func freshnessLifetime(cached *CachedResponse) (time.Duration, bool) {
 	return 0, false
 }
 
-func sMaxage(cached *CachedResponse) (time.Duration, bool) {
-	matches := matches(cached.Header, cacheControlField, sMaxagePattern)
+func sMaxage(cached *Representation) (time.Duration, bool) {
+	matches := matches(cached.HeaderMap, cacheControlField, sMaxagePattern)
 	if matches == nil {
 		return time.Duration(0), false
 	}
@@ -272,8 +249,8 @@ func sMaxage(cached *CachedResponse) (time.Duration, bool) {
 	return time.Duration(s) * time.Second, true
 }
 
-func maxAge(cached *CachedResponse) (time.Duration, bool) {
-	matches := matches(cached.Header, cacheControlField, maxAgePattern)
+func maxAge(cached *Representation) (time.Duration, bool) {
+	matches := matches(cached.HeaderMap, cacheControlField, maxAgePattern)
 	if matches == nil {
 		return time.Duration(0), false
 	}
@@ -286,8 +263,8 @@ func maxAge(cached *CachedResponse) (time.Duration, bool) {
 	return time.Duration(s) * time.Second, true
 }
 
-func expires(cached *CachedResponse) (time.Time, bool) {
-	vs := cached.Header[expiresField]
+func expires(cached *Representation) (time.Time, bool) {
+	vs := cached.HeaderMap[expiresField]
 	if len(vs) != 1 {
 		return time.Now(), false
 	}
@@ -319,8 +296,8 @@ func parseHTTPTime(s string) (time.Time, error) {
 	return time.Now(), fmt.Errorf("invalid HTTP time: %s", s)
 }
 
-func maxStale(cached *CachedResponse) time.Duration {
-	matches := matches(cached.Header, cacheControlField, maxStalePattern)
+func maxStale(cached *Representation) time.Duration {
+	matches := matches(cached.HeaderMap, cacheControlField, maxStalePattern)
 	if matches == nil {
 		return time.Duration(0)
 	}
@@ -333,15 +310,15 @@ func maxStale(cached *CachedResponse) time.Duration {
 	return time.Duration(s) * time.Second
 }
 
-func currentAge(cached *CachedResponse) time.Duration {
+func currentAge(cached *Representation) time.Duration {
 	return correctedInitialAge(cached) + residentTime(cached)
 }
 
-func residentTime(cached *CachedResponse) time.Duration {
+func residentTime(cached *Representation) time.Duration {
 	return time.Since(cached.ResponseTime)
 }
 
-func correctedInitialAge(cached *CachedResponse) time.Duration {
+func correctedInitialAge(cached *Representation) time.Duration {
 	a := apparentAge(cached)
 	c := correctedAgeValue(cached)
 
@@ -352,7 +329,7 @@ func correctedInitialAge(cached *CachedResponse) time.Duration {
 	return a
 }
 
-func apparentAge(cached *CachedResponse) time.Duration {
+func apparentAge(cached *Representation) time.Duration {
 	date, ok := dateValue(cached)
 	if !ok {
 		return time.Duration(0)
@@ -367,8 +344,8 @@ func apparentAge(cached *CachedResponse) time.Duration {
 	return time.Duration(0)
 }
 
-func dateValue(cached *CachedResponse) (time.Time, bool) {
-	vs := values(cached.Header, dateField)
+func dateValue(cached *Representation) (time.Time, bool) {
+	vs := values(cached.HeaderMap, dateField)
 	if len(vs) != 1 {
 		return time.Now(), false
 	}
@@ -381,12 +358,12 @@ func dateValue(cached *CachedResponse) (time.Time, bool) {
 	return t, true
 }
 
-func correctedAgeValue(cached *CachedResponse) time.Duration {
+func correctedAgeValue(cached *Representation) time.Duration {
 	return ageValue(cached) + responseDelay(cached)
 }
 
-func ageValue(cached *CachedResponse) time.Duration {
-	vs := values(cached.Header, ageField)
+func ageValue(cached *Representation) time.Duration {
+	vs := values(cached.HeaderMap, ageField)
 	if len(vs) != 1 {
 		return time.Duration(0)
 	}
@@ -401,17 +378,17 @@ func ageValue(cached *CachedResponse) time.Duration {
 	return time.Duration(s) * time.Second
 }
 
-func responseDelay(cached *CachedResponse) time.Duration {
+func responseDelay(cached *Representation) time.Duration {
 	return cached.ResponseTime.Sub(cached.RequestTime)
 }
 
 // Cacheable checks if the req/resp pair is cacheable based on https://tools.ietf.org/html/rfc7234#section-3
-func Cacheable(req *http.Request, resp *common.ResponseBuffer) bool {
+func Cacheable(req *http.Request, rep *Representation) bool {
 	if req.Method != http.MethodGet {
 		return false
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if rep.StatusCode != http.StatusOK {
 		return false
 	}
 
@@ -419,21 +396,21 @@ func Cacheable(req *http.Request, resp *common.ResponseBuffer) bool {
 		return false
 	}
 
-	if contains(resp.HeaderMap, cacheControlField, noStoreOrPrivate) {
+	if contains(rep.HeaderMap, cacheControlField, noStoreOrPrivate) {
 		return false
 	}
 
 	if _, ok := req.Header[authorizationField]; ok {
-		if !contains(resp.HeaderMap, cacheControlField, mustRevalidateOrPublicOrSMaxage) {
+		if !contains(rep.HeaderMap, cacheControlField, mustRevalidateOrPublicOrSMaxage) {
 			return false
 		}
 	}
 
-	if _, ok := resp.HeaderMap[expiresField]; ok {
+	if _, ok := rep.HeaderMap[expiresField]; ok {
 		return true
 	}
 
-	if contains(resp.HeaderMap, cacheControlField, maxAgeOrSMaxageOrPublic) {
+	if contains(rep.HeaderMap, cacheControlField, maxAgeOrSMaxageOrPublic) {
 		return true
 	}
 

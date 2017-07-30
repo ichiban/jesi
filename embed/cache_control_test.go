@@ -5,22 +5,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/cache"
 )
 
 func TestNewCacheControl(t *testing.T) {
 	testCases := []struct {
-		resp *common.ResponseBuffer
-		cc   *CacheControl
+		rep *cache.Representation
+		cc  *CacheControl
 	}{
 		{
-			resp: &common.ResponseBuffer{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{},
 			},
 			cc: &CacheControl{},
 		},
-		{ // If we find Expires, convert it to Cache-Control: max-date.
-			resp: &common.ResponseBuffer{
+		{ // If we find Expires, convert it to Store-CacheControl: max-date.
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
 					"Date":    []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
 					"Expires": []string{"Thu, 01 Dec 1994 16:00:10 GMT"},
@@ -34,7 +34,7 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{ // If we can't parse Expires (especially "0"), that means max-age=0.
-			resp: &common.ResponseBuffer{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
 					"Expires": []string{"0"},
 				},
@@ -47,7 +47,7 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{
-			resp: &common.ResponseBuffer{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
 					"Cache-Control": []string{
 						"must-revalidate",
@@ -74,7 +74,7 @@ func TestNewCacheControl(t *testing.T) {
 			},
 		},
 		{
-			resp: &common.ResponseBuffer{
+			rep: &cache.Representation{
 				HeaderMap: http.Header{
 					"Cache-Control": []string{"must-revalidate, no-cache, no-store, public, private, immutable, max-age=123456789"},
 				},
@@ -95,7 +95,7 @@ func TestNewCacheControl(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		result := NewCacheControl(tc.resp)
+		result := NewCacheControl(tc.rep)
 
 		if tc.cc.MustRevalidate != result.MustRevalidate {
 			t.Errorf("(%d) MustRevalidate: expected %#v, got %#v", i, tc.cc.MustRevalidate, result.MustRevalidate)

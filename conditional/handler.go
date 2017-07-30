@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ichiban/jesi/common"
+	"github.com/ichiban/jesi/cache"
 	"github.com/ichiban/jesi/request"
 	log "github.com/sirupsen/logrus"
 )
@@ -40,10 +40,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var resp common.ResponseBuffer
-	h.Next.ServeHTTP(&resp, r)
+	var rep cache.Representation
+	h.Next.ServeHTTP(&rep, r)
 	defer func() {
-		if _, err := resp.WriteTo(w); err != nil {
+		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
 				"request": request.ID(r),
 				"error":   err,
@@ -51,12 +51,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if etag != strings.TrimSpace(resp.HeaderMap.Get(etagField)) {
+	if etag != strings.TrimSpace(rep.HeaderMap.Get(etagField)) {
 		return
 	}
 
-	resp.StatusCode = http.StatusNotModified
-	delete(resp.HeaderMap, contentTypeField)
-	delete(resp.HeaderMap, contentLengthField)
-	resp.Body = nil
+	rep.StatusCode = http.StatusNotModified
+	delete(rep.HeaderMap, contentTypeField)
+	delete(rep.HeaderMap, contentLengthField)
+	rep.Body = nil
 }

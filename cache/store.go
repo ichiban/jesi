@@ -13,8 +13,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Cache stores pairs of requests/responses.
-type Cache struct {
+// Store stores pairs of requests/responses.
+type Store struct {
 	sync.RWMutex
 	Resource        map[ResourceKey]*Resource
 	History         *list.List
@@ -23,11 +23,11 @@ type Cache struct {
 }
 
 // Set inserts/updates a new pair of request/response to the cache.
-func (c *Cache) Set(req *http.Request, cached *Representation) {
-	c.init()
+func (s *Store) Set(req *http.Request, cached *Representation) {
+	s.init()
 
-	c.Lock()
-	defer c.Unlock()
+	s.Lock()
+	defer s.Unlock()
 
 	urlKey := NewResourceKey(req)
 	log.WithFields(log.Fields{
@@ -37,10 +37,10 @@ func (c *Cache) Set(req *http.Request, cached *Representation) {
 		"query":  urlKey.Query,
 	}).Debug("Will set a set of variations to a URL key")
 
-	variations, ok := c.Resource[urlKey]
+	variations, ok := s.Resource[urlKey]
 	if !ok {
 		variations = NewResource(cached)
-		c.Resource[urlKey] = variations
+		s.Resource[urlKey] = variations
 	}
 
 	varKey := NewRepresentationKey(variations, req)
@@ -49,7 +49,7 @@ func (c *Cache) Set(req *http.Request, cached *Representation) {
 	}).Debug("Will set a cached response to a variation key")
 
 	if old, ok := variations.Representations[varKey]; ok && old.Element != nil {
-		c.History.Remove(old.Element)
+		s.History.Remove(old.Element)
 
 		log.WithFields(log.Fields{
 			"method":    urlKey.Method,
@@ -60,36 +60,36 @@ func (c *Cache) Set(req *http.Request, cached *Representation) {
 		}).Debug("Removed an old cached response from the history")
 	}
 	variations.Representations[varKey] = cached
-	cached.Element = c.History.PushFront(key{resource: urlKey, representation: varKey})
+	cached.Element = s.History.PushFront(key{resource: urlKey, representation: varKey})
 
-	if c.Max == 0 {
+	if s.Max == 0 {
 		return
 	}
 
 	var stats runtime.MemStats
-	for i := 0; i < c.History.Len(); i++ {
+	for i := 0; i < s.History.Len(); i++ {
 		runtime.ReadMemStats(&stats)
 
 		log.WithFields(log.Fields{
 			"inuse": stats.HeapInuse,
-			"max":   c.Max,
+			"max":   s.Max,
 		}).Info("Read memory stats")
 
-		if stats.HeapInuse < c.Max {
+		if stats.HeapInuse < s.Max {
 			break
 		}
 
-		c.evictLRU()
+		s.evictLRU()
 	}
 }
 
-func (c *Cache) evictLRU() {
-	e := c.History.Back()
+func (s *Store) evictLRU() {
+	e := s.History.Back()
 	if e == nil {
 		log.Warn("Couldn't find a cached response to free")
 		return
 	}
-	c.History.Remove(e)
+	s.History.Remove(e)
 	k := e.Value.(key)
 
 	log.WithFields(log.Fields{
@@ -100,7 +100,7 @@ func (c *Cache) evictLRU() {
 		"variation": k.representation,
 	}).Debug("Will evict a key from the cache")
 
-	pe, ok := c.Resource[k.resource]
+	pe, ok := s.Resource[k.resource]
 	if !ok {
 		return
 	}
@@ -110,7 +110,7 @@ func (c *Cache) evictLRU() {
 	}
 
 	if len(pe.Representations) == 0 {
-		delete(c.Resource, k.resource)
+		delete(s.Resource, k.resource)
 	}
 
 	log.WithFields(log.Fields{
@@ -123,11 +123,11 @@ func (c *Cache) evictLRU() {
 }
 
 // Get retrieves a cached response.
-func (c *Cache) Get(req *http.Request) *Representation {
-	c.init()
+func (s *Store) Get(req *http.Request) *Representation {
+	s.init()
 
-	c.RLock()
-	defer c.RUnlock()
+	s.RLock()
+	defer s.RUnlock()
 
 	pKey := NewResourceKey(req)
 	log.WithFields(log.Fields{
@@ -137,7 +137,7 @@ func (c *Cache) Get(req *http.Request) *Representation {
 		"query":  pKey.Query,
 	}).Debug("Will get a set of variations for a URL key")
 
-	pe, ok := c.Resource[pKey]
+	pe, ok := s.Resource[pKey]
 	if !ok {
 		log.WithFields(log.Fields{
 			"method": pKey.Method,
@@ -168,7 +168,7 @@ func (c *Cache) Get(req *http.Request) *Representation {
 	}
 
 	if cached.Element != nil {
-		c.History.MoveToFront(cached.Element)
+		s.History.MoveToFront(cached.Element)
 
 		log.WithFields(log.Fields{
 			"method":    pKey.Method,
@@ -190,16 +190,16 @@ func (c *Cache) Get(req *http.Request) *Representation {
 	return cached.clone()
 }
 
-func (c *Cache) init() {
-	c.Lock()
-	defer c.Unlock()
+func (s *Store) init() {
+	s.Lock()
+	defer s.Unlock()
 
-	if c.Resource == nil {
-		c.Resource = make(map[ResourceKey]*Resource)
+	if s.Resource == nil {
+		s.Resource = make(map[ResourceKey]*Resource)
 	}
 
-	if c.History == nil {
-		c.History = list.New()
+	if s.History == nil {
+		s.History = list.New()
 	}
 }
 
@@ -301,7 +301,7 @@ const (
 )
 
 // State returns the state of cached response.
-func (c *Cache) State(req *http.Request, cached *Representation) (CachedState, time.Duration) {
+func (s *Store) State(req *http.Request, cached *Representation) (CachedState, time.Duration) {
 	if cached == nil {
 		return Miss, time.Duration(0)
 	}
@@ -325,7 +325,7 @@ func (c *Cache) State(req *http.Request, cached *Representation) (CachedState, t
 		age := currentAge(cached)
 
 		// cached responses before the last destructive requests (e.g. POST) are considered outdated.
-		if time.Since(c.OriginChangedAt) <= age {
+		if time.Since(s.OriginChangedAt) <= age {
 			return Revalidate, time.Duration(0)
 		}
 

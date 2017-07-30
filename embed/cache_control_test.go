@@ -19,7 +19,7 @@ func TestNewCacheControl(t *testing.T) {
 			},
 			cc: &CacheControl{},
 		},
-		{ // If we find Expires, convert it to Cache-Control: max-date.
+		{ // If we find Expires, convert it to Store-Control: max-date.
 			resp: &cache.Representation{
 				HeaderMap: http.Header{
 					"Date":    []string{"Thu, 01 Dec 1994 16:00:00 GMT"},
@@ -49,7 +49,7 @@ func TestNewCacheControl(t *testing.T) {
 		{
 			resp: &cache.Representation{
 				HeaderMap: http.Header{
-					"Cache-Control": []string{
+					"Store-Control": []string{
 						"must-revalidate",
 						"no-cache",
 						"no-store",
@@ -76,7 +76,7 @@ func TestNewCacheControl(t *testing.T) {
 		{
 			resp: &cache.Representation{
 				HeaderMap: http.Header{
-					"Cache-Control": []string{"must-revalidate, no-cache, no-store, public, private, immutable, max-age=123456789"},
+					"Store-Control": []string{"must-revalidate, no-cache, no-store, public, private, immutable, max-age=123456789"},
 				},
 			},
 			cc: &CacheControl{

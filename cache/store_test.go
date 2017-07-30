@@ -6,20 +6,20 @@ import (
 	"testing"
 )
 
-func TestCache_Get(t *testing.T) {
+func TestStore_Get(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
 	if err != nil {
 		t.Error(err)
 	}
 
 	testCases := []struct {
-		cache *Cache
+		store *Store
 		req   *http.Request
 
 		rep *Representation
 	}{
 		{ // when it's not cached
-			cache: &Cache{},
+			store: &Store{},
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -28,7 +28,7 @@ func TestCache_Get(t *testing.T) {
 			rep: nil,
 		},
 		{ // when it's cached
-			cache: &Cache{
+			store: &Store{
 				Resource: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Representations: map[RepresentationKey]*Representation{
@@ -50,7 +50,7 @@ func TestCache_Get(t *testing.T) {
 			},
 		},
 		{ // when it's cached and also the representation key matches
-			cache: &Cache{
+			store: &Store{
 				Resource: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
@@ -77,7 +77,7 @@ func TestCache_Get(t *testing.T) {
 			},
 		},
 		{ // when it's cached but the representation key doesn't match
-			cache: &Cache{
+			store: &Store{
 				Resource: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
@@ -101,7 +101,7 @@ func TestCache_Get(t *testing.T) {
 			rep: nil,
 		},
 		{ // when it's cached but the method doesn't match
-			cache: &Cache{
+			store: &Store{
 				Resource: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Representations: map[RepresentationKey]*Representation{
@@ -122,7 +122,7 @@ func TestCache_Get(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		rep := tc.cache.Get(tc.req)
+		rep := tc.store.Get(tc.req)
 
 		if tc.rep == nil && rep != nil {
 			t.Errorf("expected nil, got %#v", rep)
@@ -155,14 +155,14 @@ func TestCache_Get(t *testing.T) {
 	}
 }
 
-func TestCache_Set(t *testing.T) {
+func TestStore_Set(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
 	if err != nil {
 		t.Error(err)
 	}
 
 	testCases := []struct {
-		cache *Cache
+		store *Store
 		req   *http.Request
 		rep   *Representation
 
@@ -170,7 +170,7 @@ func TestCache_Set(t *testing.T) {
 		secondary RepresentationKey
 	}{
 		{ // when there's no entry for the request (insert)
-			cache: &Cache{},
+			store: &Store{},
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -183,7 +183,7 @@ func TestCache_Set(t *testing.T) {
 			secondary: "",
 		},
 		{ // when there's an existing entry for the request (replace)
-			cache: &Cache{
+			store: &Store{
 				Resource: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Representations: map[RepresentationKey]*Representation{
@@ -204,7 +204,7 @@ func TestCache_Set(t *testing.T) {
 			secondary: "",
 		},
 		{ // when there's Vary header field
-			cache: &Cache{},
+			store: &Store{},
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -226,11 +226,11 @@ func TestCache_Set(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc.cache.Set(tc.req, tc.rep)
+		tc.store.Set(tc.req, tc.rep)
 
-		pe, ok := tc.cache.Resource[tc.primary]
+		pe, ok := tc.store.Resource[tc.primary]
 		if !ok {
-			t.Errorf("expected cache to have an entry for %#v but not", tc.primary)
+			t.Errorf("expected store to have an entry for %#v but not", tc.primary)
 		}
 
 		rep, ok := pe.Representations[tc.secondary]
@@ -253,11 +253,11 @@ func TestCache_Set(t *testing.T) {
 			t.Errorf("expected %#v, got %#v", string(tc.rep.Body), string(rep.Body))
 		}
 
-		if tc.cache.History.Len() != 1 {
-			t.Errorf("expected 1, got %d", tc.cache.History.Len())
+		if tc.store.History.Len() != 1 {
+			t.Errorf("expected 1, got %d", tc.store.History.Len())
 		}
 
-		k := tc.cache.History.Front().Value.(key)
+		k := tc.store.History.Front().Value.(key)
 		if tc.primary != k.resource {
 			t.Errorf("expected %v, got %v", tc.primary, k.resource)
 		}

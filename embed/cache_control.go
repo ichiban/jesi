@@ -2,10 +2,10 @@ package embed
 
 import (
 	"fmt"
-	"github.com/ichiban/jesi/cache"
 	"strconv"
 	"strings"
 	"time"
+	"github.com/ichiban/jesi/cache"
 )
 
 // CacheControl represents a response's cache policy.
@@ -22,7 +22,7 @@ type CacheControl struct {
 const (
 	expires      = "Expires"
 	date         = "Date"
-	cacheControl = "Cache-Control"
+	cacheControl = "Store-Control"
 
 	mustRevalidate = "must-revalidate"
 	noCache        = "no-cache"
@@ -65,7 +65,7 @@ func NewCacheControl(rep *cache.Representation) *CacheControl {
 	return c
 }
 
-// Convert Expires to Cache-Control: max-age
+// Convert Expires to Store-Control: max-age
 func newCacheControlExpires(rep *cache.Representation) *CacheControl {
 	var c CacheControl
 
@@ -99,7 +99,7 @@ func newCacheControlExpires(rep *cache.Representation) *CacheControl {
 }
 
 // TODO: Proper directive parsing.
-// Cache-Control directives can be something like `private="foo,bar,baz"`.
+// Store-Control directives can be something like `private="foo,bar,baz"`.
 func directives(rep *cache.Representation) []string {
 	ds := []string{}
 	for _, v := range rep.HeaderMap[cacheControl] {

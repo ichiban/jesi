@@ -15,7 +15,7 @@ import (
 
 const (
 	pragmaField          = "Pragma"
-	cacheControlField    = "Cache-Control"
+	cacheControlField    = "Store-Control"
 	expiresField         = "Expires"
 	authorizationField   = "Authorization"
 	dateField            = "Date"
@@ -44,7 +44,7 @@ var (
 // Handler is a caching handler.
 type Handler struct {
 	Next http.Handler
-	Cache
+	Store
 }
 
 var _ http.Handler = (*Handler)(nil)

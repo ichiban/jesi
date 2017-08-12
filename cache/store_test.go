@@ -29,7 +29,7 @@ func TestStore_Get(t *testing.T) {
 		},
 		{ // when it's cached
 			store: &Store{
-				Resource: map[ResourceKey]*Resource{
+				Resources: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Representations: map[RepresentationKey]*Representation{
 							"": {
@@ -51,7 +51,7 @@ func TestStore_Get(t *testing.T) {
 		},
 		{ // when it's cached and also the representation key matches
 			store: &Store{
-				Resource: map[ResourceKey]*Resource{
+				Resources: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
 						Representations: map[RepresentationKey]*Representation{
@@ -78,7 +78,7 @@ func TestStore_Get(t *testing.T) {
 		},
 		{ // when it's cached but the representation key doesn't match
 			store: &Store{
-				Resource: map[ResourceKey]*Resource{
+				Resources: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
 						Representations: map[RepresentationKey]*Representation{
@@ -102,7 +102,7 @@ func TestStore_Get(t *testing.T) {
 		},
 		{ // when it's cached but the method doesn't match
 			store: &Store{
-				Resource: map[ResourceKey]*Resource{
+				Resources: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Representations: map[RepresentationKey]*Representation{
 							"": {
@@ -184,7 +184,7 @@ func TestStore_Set(t *testing.T) {
 		},
 		{ // when there's an existing entry for the request (replace)
 			store: &Store{
-				Resource: map[ResourceKey]*Resource{
+				Resources: map[ResourceKey]*Resource{
 					ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
 						Representations: map[RepresentationKey]*Representation{
 							"": {},
@@ -228,7 +228,7 @@ func TestStore_Set(t *testing.T) {
 	for _, tc := range testCases {
 		tc.store.Set(tc.req, tc.rep)
 
-		pe, ok := tc.store.Resource[tc.primary]
+		pe, ok := tc.store.Resources[tc.primary]
 		if !ok {
 			t.Errorf("expected store to have an entry for %#v but not", tc.primary)
 		}

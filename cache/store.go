@@ -16,9 +16,9 @@ import (
 // Store stores pairs of requests/responses.
 type Store struct {
 	sync.RWMutex
-	Resource        map[ResourceKey]*Resource
+	Resources       map[ResourceKey]*Resource
 	History         *list.List
-	Max             uint64
+	Max             int
 	OriginChangedAt time.Time
 }
 
@@ -35,20 +35,20 @@ func (s *Store) Set(req *http.Request, cached *Representation) {
 		"host":   urlKey.Host,
 		"path":   urlKey.Path,
 		"query":  urlKey.Query,
-	}).Debug("Will set a set of variations to a URL key")
+	}).Debug("Will set a resource to a URL key")
 
-	variations, ok := s.Resource[urlKey]
+	resource, ok := s.Resources[urlKey]
 	if !ok {
-		variations = NewResource(cached)
-		s.Resource[urlKey] = variations
+		resource = NewResource(cached)
+		s.Resources[urlKey] = resource
 	}
 
-	varKey := NewRepresentationKey(variations, req)
+	varKey := NewRepresentationKey(resource, req)
 	log.WithFields(log.Fields{
 		"variation": varKey,
 	}).Debug("Will set a cached response to a variation key")
 
-	if old, ok := variations.Representations[varKey]; ok && old.Element != nil {
+	if old, ok := resource.Representations[varKey]; ok && old.Element != nil {
 		s.History.Remove(old.Element)
 
 		log.WithFields(log.Fields{
@@ -59,12 +59,14 @@ func (s *Store) Set(req *http.Request, cached *Representation) {
 			"variation": varKey,
 		}).Debug("Removed an old cached response from the history")
 	}
-	variations.Representations[varKey] = cached
+	resource.Representations[varKey] = cached
 	cached.Element = s.History.PushFront(key{resource: urlKey, representation: varKey})
 
 	if s.Max == 0 {
 		return
 	}
+
+	maxInBytes := uint64(s.Max) * 1024 * 1024 // MB
 
 	var stats runtime.MemStats
 	for i := 0; i < s.History.Len(); i++ {
@@ -75,7 +77,7 @@ func (s *Store) Set(req *http.Request, cached *Representation) {
 			"max":   s.Max,
 		}).Info("Read memory stats")
 
-		if stats.HeapInuse < s.Max {
+		if stats.HeapInuse < maxInBytes {
 			break
 		}
 
@@ -100,7 +102,7 @@ func (s *Store) evictLRU() {
 		"variation": k.representation,
 	}).Debug("Will evict a key from the cache")
 
-	pe, ok := s.Resource[k.resource]
+	pe, ok := s.Resources[k.resource]
 	if !ok {
 		return
 	}
@@ -110,7 +112,7 @@ func (s *Store) evictLRU() {
 	}
 
 	if len(pe.Representations) == 0 {
-		delete(s.Resource, k.resource)
+		delete(s.Resources, k.resource)
 	}
 
 	log.WithFields(log.Fields{
@@ -137,7 +139,7 @@ func (s *Store) Get(req *http.Request) *Representation {
 		"query":  pKey.Query,
 	}).Debug("Will get a set of variations for a URL key")
 
-	pe, ok := s.Resource[pKey]
+	pe, ok := s.Resources[pKey]
 	if !ok {
 		log.WithFields(log.Fields{
 			"method": pKey.Method,
@@ -194,8 +196,8 @@ func (s *Store) init() {
 	s.Lock()
 	defer s.Unlock()
 
-	if s.Resource == nil {
-		s.Resource = make(map[ResourceKey]*Resource)
+	if s.Resources == nil {
+		s.Resources = make(map[ResourceKey]*Resource)
 	}
 
 	if s.History == nil {

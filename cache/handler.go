@@ -13,7 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-
 var (
 	noStore                         = regexp.MustCompile(`\Ano-store\z`)
 	noStoreOrPrivate                = regexp.MustCompile(`\A(?:no-store|private)\z`)
@@ -31,7 +30,7 @@ var (
 // Handler is a caching handler.
 type Handler struct {
 	Next http.Handler
-	Store
+	*Store
 }
 
 var _ http.Handler = (*Handler)(nil)

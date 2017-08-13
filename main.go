@@ -17,7 +17,7 @@ import (
 var version string
 
 func main() {
-	var proxy Proxy
+	var proxy ReverseProxy
 	var backends balance.BackendPool
 	var store cache.Store
 	var verbose bool
@@ -36,23 +36,13 @@ func main() {
 
 	go backends.Run(nil)
 
-	controls.Backends = &backends
-	controls.Store = &store
+	events := make(chan *control.Event)
+	controls.Events = events
 	go controls.Run()
 
-	handler := http.Handler(&balance.Handler{
-		BackendPool: &backends,
-	})
-	handler = &cache.Handler{
-		Next:  handler,
-		Store: &store,
-	}
-	handler = &embed.Handler{
-		Next: handler,
-	}
-	handler = &conditional.Handler{
-		Next: handler,
-	}
+	proxy.Backends = &backends
+	proxy.Store = &store
+	go proxy.Run()
 
 	log.WithFields(log.Fields{
 		"version": version,
@@ -61,19 +51,37 @@ func main() {
 		"verbose": verbose,
 	}).Info("Started a server")
 
-	proxy.Handler = handler
-	proxy.Run()
+	for range events {
+
+	}
 }
 
-type Proxy struct {
-	Port    int
-	Handler http.Handler
+// ReverseProxy handles requests from downstream.
+type ReverseProxy struct {
+	Port     int
+	Backends *balance.BackendPool
+	Store    *cache.Store
 }
 
-func (p *Proxy) Run() {
+// Run runs the reverse proxy.
+func (p *ReverseProxy) Run() {
+	var handler http.Handler
+	handler = &balance.Handler{
+		BackendPool: p.Backends,
+	}
+	handler = &cache.Handler{
+		Next:  handler,
+		Store: p.Store,
+	}
+	handler = &embed.Handler{
+		Next: handler,
+	}
+	handler = &conditional.Handler{
+		Next: handler,
+	}
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", p.Port),
-		Handler: p.Handler,
+		Handler: handler,
 	}
 
 	if err := server.ListenAndServe(); err != nil {

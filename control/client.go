@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -13,25 +12,18 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
-
-	"github.com/ichiban/jesi/balance"
-	"github.com/ichiban/jesi/cache"
 )
 
+// Client talks to a control server and receives events which will change states of the running process.
 type Client struct {
 	http.Client
-
-	Backends *balance.BackendPool
-	Store    *cache.Store
-
-	URL *url.URL
-
+	URL         *url.URL
 	LastEventID string
 	Retry       time.Duration
-
-	Events chan *Event
+	Events      chan *Event
 }
 
+// Run runs the client.
 func (c *Client) Run() {
 	log.WithFields(log.Fields{
 		"control": c.URL,
@@ -62,9 +54,9 @@ func (c *Client) Run() {
 			"status":  resp.StatusCode,
 		}).Info("Opened a stream from a control server")
 
-		r := EventReader{Reader: bufio.NewReader(resp.Body)}
+		r := eventReader{Reader: bufio.NewReader(resp.Body)}
 		for {
-			e, err := r.ReadEvent()
+			e, err := r.readEvent()
 			if err != nil {
 				log.WithFields(log.Fields{
 					"error": err,
@@ -83,7 +75,12 @@ func (c *Client) Run() {
 			c.Events <- e
 		}
 
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.WithFields(log.Fields{
+				"control": c.URL,
+				"error":   err,
+			}).Error("Failed to close body")
+		}
 
 		log.WithFields(log.Fields{
 			"control": c.URL,
@@ -98,113 +95,48 @@ func (c *Client) Run() {
 	}
 }
 
+func (c *Client) String() string {
+	return c.URL.String()
+}
+
+// Event represents an event from the control server.
 type Event struct {
 	ID    string
-	Type  string
+	Event string
 	Data  []byte
 	Retry time.Duration
 }
 
-var _ io.WriterTo = (*Event)(nil)
-
-func (e *Event) WriteTo(w io.Writer) (int64, error) {
-	var res int64
-
-	if e.ID != "" {
-		n, err := fmt.Fprintf(w, "id: %s\n", e.ID)
-		if err != nil {
-			return res, err
-		}
-		res += int64(n)
-	}
-
-	if e.Type != "" {
-		n, err := fmt.Fprintf(w, "event: %s\n", e.Type)
-		if err != nil {
-			return res, err
-		}
-		res += int64(n)
-	}
-
-	if len(e.Data) != 0 {
-		n, err := fmt.Fprintf(w, "data: %s\n", e.Data)
-		if err != nil {
-			return res, err
-		}
-		res += int64(n)
-	}
-
-	if e.Retry != 0 {
-		n, err := fmt.Fprintf(w, "retry: %d\n", e.Retry.Nanoseconds()/1000000)
-		if err != nil {
-			return res, err
-		}
-		res += int64(n)
-	}
-
-	n, err := fmt.Fprint(w, "\n")
-	if err != nil {
-		return res, err
-	}
-	res += int64(n)
-
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
-
-	return res, nil
-}
-
 var (
-	CommentOrFieldPattern = regexp.MustCompile(`([\x{0000}-\x{0009}\x{000B}-\x{000C}\x{000E}-\x{0039}\x{003B}-\x{10FFFF}]*): ?([\x{0000}-\x{0009}\x{000B}-\x{000C}\x{000E}-\x{10FFFF}]*)`)
+	commentOrField = regexp.MustCompile(`([\x{0000}-\x{0009}\x{000B}-\x{000C}\x{000E}-\x{0039}\x{003B}-\x{10FFFF}]*): ?([\x{0000}-\x{0009}\x{000B}-\x{000C}\x{000E}-\x{10FFFF}]*)`)
 )
 
-type EventReader struct {
+type eventReader struct {
 	*bufio.Reader
 }
 
-func (r *EventReader) ReadEvent() (*Event, error) {
-	var e *Event
+func (r *eventReader) readEvent() (*Event, error) {
+	var e Event
 	for {
-		var l []byte
-		var m bool
-		var err error
-		for {
-			var b []byte
-			b, m, err = r.ReadLine()
-			if err != nil {
-				return nil, err
-			}
-			l = append(l, b...)
-			if !m {
-				break
-			}
+		l, err := r.line()
+		if err != nil {
+			return nil, err
 		}
 
 		// end of event
 		if len(l) == 0 {
-			if e == nil {
-				continue
-			}
-			return e, nil
+			return &e, nil
 		}
 
-		ms := CommentOrFieldPattern.FindAllSubmatch(l, -1)
+		ms := commentOrField.FindAllSubmatch(l, -1)
 		field := ms[0][1]
 		value := ms[0][2]
 
-		// comment
-		if len(field) == 0 {
-			continue
-		}
-
-		if e == nil {
-			e = &Event{}
-		}
-
 		switch string(field) {
+		case "": // comment
+			continue
 		case "event":
-			e.Type = string(value)
+			e.Event = string(value)
 		case "data":
 			e.Data = append(e.Data, value...)
 		case "id":
@@ -221,13 +153,28 @@ func (r *EventReader) ReadEvent() (*Event, error) {
 	}
 }
 
+func (r *eventReader) line() ([]byte, error) {
+	var l []byte
+	var m bool
+	var err error
+	for {
+		var b []byte
+		b, m, err = r.ReadLine()
+		if err != nil {
+			return nil, err
+		}
+		l = append(l, b...)
+		if !m {
+			break
+		}
+	}
+	return l, nil
+}
+
+// ClientPool is a set of clients.
 type ClientPool struct {
 	Clients []*Client
-
-	Backends *balance.BackendPool
-	Store    *cache.Store
-
-	Events chan *Event
+	Events  chan *Event
 }
 
 var _ flag.Value = (*ClientPool)(nil)
@@ -236,6 +183,7 @@ func (p *ClientPool) String() string {
 	return fmt.Sprintf("%s", p.Clients)
 }
 
+// Set adds a brand new client based on the given URL.
 func (p *ClientPool) Set(s string) error {
 	u, err := url.Parse(s)
 	if err != nil {
@@ -243,13 +191,13 @@ func (p *ClientPool) Set(s string) error {
 	}
 
 	p.Clients = append(p.Clients, &Client{
-		URL:    u,
-		Events: p.Events,
+		URL: u,
 	})
 
 	return nil
 }
 
+// Add adds a client to the pool.
 func (p *ClientPool) Add(c *Client) {
 	p.Clients = append(p.Clients, c)
 	log.WithFields(log.Fields{
@@ -257,16 +205,16 @@ func (p *ClientPool) Add(c *Client) {
 	}).Info("Added a control server")
 }
 
+// Run runs all the clients in the pool.
 func (p *ClientPool) Run() {
 	var wg sync.WaitGroup
 	for _, c := range p.Clients {
-		c.Backends = p.Backends
-		c.Store = p.Store
 		wg.Add(1)
-		go func() {
+		go func(c *Client) {
+			c.Events = p.Events
 			c.Run()
 			wg.Done()
-		}()
+		}(c)
 	}
 	wg.Wait()
 }

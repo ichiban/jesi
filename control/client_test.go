@@ -26,7 +26,7 @@ func TestClient_Run(t *testing.T) {
 			},
 			out: []*Event{
 				{
-					Type: "foo",
+					Event: "foo",
 				},
 			},
 		},
@@ -37,8 +37,8 @@ func TestClient_Run(t *testing.T) {
 			},
 			out: []*Event{
 				{
-					Type: "bar",
-					Data: []byte("baz"),
+					Event: "bar",
+					Data:  []byte("baz"),
 				},
 			},
 		},
@@ -80,8 +80,8 @@ func TestClient_Run(t *testing.T) {
 				if expected.ID != got.ID {
 					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, expected.ID, got.ID)
 				}
-				if expected.Type != got.Type {
-					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, expected.Type, got.Type)
+				if expected.Event != got.Event {
+					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, expected.Event, got.Event)
 				}
 				if string(expected.Data) != string(got.Data) {
 					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, string(expected.Data), string(got.Data))

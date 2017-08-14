@@ -38,22 +38,19 @@ func main() {
 
 	events := make(chan *control.Event)
 	controls.Events = events
-	go controls.Run()
-
-	proxy.Backends = &backends
-	proxy.Store = &store
-	go proxy.Run()
+	go controls.Run(nil)
+	log.AddHook(&controls)
 
 	log.WithFields(log.Fields{
 		"version": version,
 		"port":    proxy.Port,
 		"max":     store.Max,
 		"verbose": verbose,
-	}).Info("Started a server")
+	}).Info("Start a server")
 
-	for range events {
-
-	}
+	proxy.Backends = &backends
+	proxy.Store = &store
+	proxy.Run()
 }
 
 // ReverseProxy handles requests from downstream.

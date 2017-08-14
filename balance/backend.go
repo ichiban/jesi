@@ -32,7 +32,7 @@ func (b *Backend) String() string {
 // When state changed, it notifies ch.
 func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
 	log.WithFields(log.Fields{
-		"backend": b,
+		"backend": b.String(),
 	}).Debug("Started probing for a backend")
 
 	if b.Interval == 0 {
@@ -45,7 +45,7 @@ func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
 		t := b.Timer
 		if t == nil {
 			log.WithFields(log.Fields{
-				"backend":  b,
+				"backend":  b.String(),
 				"interval": b.Interval,
 			}).Debug("Will prove a backend after an interval")
 
@@ -72,13 +72,13 @@ func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
 // Probe makes a probing request to the background and changes its internal state accordingly.
 func (b *Backend) Probe() {
 	log.WithFields(log.Fields{
-		"backend": b,
+		"backend": b.String(),
 	}).Debug("Started a probe into a backend")
 
 	resp, err := b.Get(b.URL.String())
 	if err != nil {
 		log.WithFields(log.Fields{
-			"backend": b,
+			"backend": b.String(),
 			"error":   err,
 		}).Debug("Couldn't get a response from a backend")
 
@@ -87,7 +87,7 @@ func (b *Backend) Probe() {
 	}
 
 	log.WithFields(log.Fields{
-		"backend": b,
+		"backend": b.String(),
 		"status":  resp.StatusCode,
 	}).Debug("Got a response from a backend")
 
@@ -162,14 +162,14 @@ func (p *BackendPool) Add(b *Backend) {
 		b.Element = p.Sick.PushBack(b)
 
 		log.WithFields(log.Fields{
-			"backend": b,
+			"backend": b.String(),
 			"queue":   "sick",
 		}).Info("Added a backend")
 	} else {
 		b.Element = p.Healthy.PushBack(b)
 
 		log.WithFields(log.Fields{
-			"backend": b,
+			"backend": b.String(),
 			"queue":   "healthy",
 		}).Info("Added a backend")
 	}
@@ -203,7 +203,7 @@ func (p *BackendPool) Run(ch chan struct{}) {
 		select {
 		case b := <-p.Changed:
 			log.WithFields(log.Fields{
-				"backend": b,
+				"backend": b.String(),
 				"sick":    b.Sick,
 			}).Debug("Detected a change of a backend's status")
 
@@ -212,14 +212,14 @@ func (p *BackendPool) Run(ch chan struct{}) {
 				b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
 
 				log.WithFields(log.Fields{
-					"backend": b,
+					"backend": b.String(),
 					"queue":   "sick",
 				}).Info("Pushed back a backend to a queue")
 			} else {
 				b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
 
 				log.WithFields(log.Fields{
-					"backend": b,
+					"backend": b.String(),
 					"queue":   "healthy",
 				}).Info("Pushed back a backend to a queue")
 			}

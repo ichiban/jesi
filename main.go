@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 
 	log "github.com/sirupsen/logrus"
 
@@ -17,18 +18,34 @@ import (
 var version string
 
 func main() {
+	var profile string
 	var proxy ReverseProxy
 	var backends balance.BackendPool
 	var store cache.Store
 	var verbose bool
 	var controls control.ClientPool
 
+	flag.StringVar(&profile, "profile", "", "run debug profiler")
 	flag.IntVar(&proxy.Port, "port", 8080, "port number")
 	flag.Var(&backends, "backend", "backend servers")
 	flag.IntVar(&store.Max, "max", 64, "max cache size in MB")
 	flag.BoolVar(&verbose, "verbose", false, "log extra information")
 	flag.Var(&controls, "control", "control servers")
 	flag.Parse()
+
+	if profile != "" {
+		go func() {
+			log.WithFields(log.Fields{
+				"host": profile,
+			}).Info("Start a debug profiler")
+			if err := http.ListenAndServe(profile, nil); err != nil {
+				log.WithFields(log.Fields{
+					"host":  profile,
+					"error": err,
+				}).Error("Failed to profile")
+			}
+		}()
+	}
 
 	if verbose {
 		log.SetLevel(log.DebugLevel)

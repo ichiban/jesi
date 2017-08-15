@@ -111,19 +111,14 @@ func (c *Client) readEventStream(q <-chan struct{}) {
 				}).Debug("Failed to readEventStream event stream")
 				break
 			}
-
 			c.Events <- e
 		}
 		done <- struct{}{}
 	}()
 
-	for {
-		select {
-		case <-done:
-			return
-		case <-q:
-			return
-		}
+	select {
+	case <-q:
+	case <-done:
 	}
 }
 
@@ -274,6 +269,12 @@ func (p *ClientPool) Levels() []log.Level {
 
 // Fire put log entries in JSON format to the control clients' buffers.
 func (p *ClientPool) Fire(e *log.Entry) error {
+	for k, v := range e.Data {
+		if v, ok := v.(fmt.Stringer); ok {
+			e.Data[k] = v.String()
+		}
+	}
+
 	b, err := p.Formatter.Format(e)
 	if err != nil {
 		return err

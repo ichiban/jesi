@@ -1,6 +1,7 @@
 package control
 
 import (
+	"compress/gzip"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"io/ioutil"
@@ -85,16 +86,17 @@ func TestClient_Run(t *testing.T) {
 		}
 
 		events := make(chan *Event)
-		quit := make(chan struct{})
 
 		client := Client{
-			URL:      u,
-			Retry:    time.Second,
-			Interval: time.Second,
-			Events:   events,
-			Quit:     quit,
+			URL:   u,
+			Retry: time.Second,
+			Handler: &testHandler{
+				events: events,
+			},
 		}
-		go client.Run(nil)
+
+		q := make(chan struct{})
+		go client.Run(q)
 
 		for j, expected := range ts.out {
 			select {
@@ -115,7 +117,8 @@ func TestClient_Run(t *testing.T) {
 				t.Errorf("(%d, %d) timeout", i, j)
 			}
 		}
-		quit <- struct{}{}
+
+		q <- struct{}{}
 		s.Close()
 	}
 }
@@ -145,7 +148,7 @@ func TestClient_String(t *testing.T) {
 	}
 }
 
-func TestClient_Flush(t *testing.T) {
+func TestClient_Report(t *testing.T) {
 	testCases := []struct {
 		buffer []byte
 	}{
@@ -155,34 +158,49 @@ func TestClient_Flush(t *testing.T) {
 	}
 
 	for i, ts := range testCases {
-		client := &Client{
-			URL: &url.URL{
-				Scheme: "http",
-				Host:   "www.example.com",
-				Path:   "/",
-			},
-		}
-		client.Transport = &testTransport{
-			f: func(req *http.Request) (*http.Response, error) {
-				b, err := ioutil.ReadAll(req.Body)
-				if err != nil {
-					t.Errorf("(%d) failed to read all: %v", i, err)
-				}
-				if string(ts.buffer) != string(b) {
-					t.Errorf("(%d) expected: %s, got: %s", i, string(ts.buffer), string(b))
-				}
+		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			contentEncoding := r.Header.Get("Content-Encoding")
+			if "gzip" != contentEncoding {
+				t.Errorf("(%d) expected: gzip, got: %s", i, contentEncoding)
+			}
 
-				return &http.Response{
-					StatusCode: http.StatusOK,
-				}, nil
-			},
+			gz, err := gzip.NewReader(r.Body)
+			if err != nil {
+				t.Errorf("(%d) failed to real gzip: %v", i, err)
+			}
+
+			b, err := ioutil.ReadAll(gz)
+			if err != nil {
+				t.Errorf("(%d) failed to read all: %v", i, err)
+			}
+
+			if string(ts.buffer) != string(b) {
+				t.Errorf("(%d) expected: %s, got: %s", i, string(ts.buffer), string(b))
+			}
+
+			w.WriteHeader(http.StatusOK)
+			if err := gz.Close(); err != nil {
+				t.Errorf("(%d) failed to close gzip: %v", i, err)
+			}
+		}))
+
+		u, err := url.Parse(s.URL)
+		if err != nil {
+			t.Errorf("(%d) failed to parse url: %v", i, err)
 		}
+
+		client := &Client{
+			URL: u,
+		}
+
 		if _, err := client.Buffer.Write(ts.buffer); err != nil {
 			t.Errorf("(%d) failed to write: %v", i, err)
 		}
-		if err := client.Flush(); err != nil {
+		if err := client.Report(u); err != nil {
 			t.Errorf("(%d) failed to flush: %v", i, err)
 		}
+
+		s.Close()
 	}
 }
 
@@ -271,9 +289,6 @@ func TestClientPool_Set(t *testing.T) {
 			if 10*time.Second != c.Retry {
 				t.Errorf("(%d, %d) expected: %s, got: %s", i, j, 10*time.Second, c.Retry)
 			}
-			if time.Minute != c.Interval {
-				t.Errorf("(%d, %d) expected: %s, got: %s", i, j, 10*time.Second, c.Interval)
-			}
 		}
 	}
 }
@@ -331,35 +346,35 @@ func TestClientPool_Add(t *testing.T) {
 }
 
 func TestClientPool_Run(t *testing.T) {
+	ch := make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ch <- struct{}{}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer s.Close()
+
+	u, err := url.Parse(s.URL)
+	if err != nil {
+		t.Errorf("failed to parse url: %v", err)
+	}
+
 	testCases := []struct {
 		clients []*Client
 	}{
 		{
 			clients: []*Client{
 				{
-					URL: &url.URL{
-						Scheme: "http",
-						Host:   "localhost",
-						Path:   "/events",
-					},
+					URL: u,
 				},
 			},
 		},
 		{
 			clients: []*Client{
 				{
-					URL: &url.URL{
-						Scheme: "http",
-						Host:   "localhost",
-						Path:   "/events",
-					},
+					URL: u,
 				},
 				{
-					URL: &url.URL{
-						Scheme: "http",
-						Host:   "www.example.com",
-						Path:   "/foo/bar",
-					},
+					URL: u,
 				},
 			},
 		},
@@ -368,8 +383,8 @@ func TestClientPool_Run(t *testing.T) {
 	for i, ts := range testCases {
 		var p ClientPool
 		p.Clients = ts.clients
-		ch := make(chan struct{})
-		go p.Run(ch)
+		q := make(chan struct{})
+		go p.Run(q)
 		for j := range ts.clients {
 			select {
 			case <-ch:
@@ -377,16 +392,7 @@ func TestClientPool_Run(t *testing.T) {
 				t.Errorf("(%d, %d) timeout", i, j)
 			}
 		}
-	}
-}
-
-func TestClientPool_Levels(t *testing.T) {
-	var p ClientPool
-	ls := p.Levels()
-	for i, l := range logrus.AllLevels {
-		if l != ls[i] {
-			t.Errorf("(%d) expected: %s, got: %s", i, l, ls[i])
-		}
+		q <- struct{}{}
 	}
 }
 
@@ -473,4 +479,14 @@ var _ http.RoundTripper = (*testTransport)(nil)
 
 func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.f(req)
+}
+
+type testHandler struct {
+	events chan *Event
+}
+
+var _ Handler = (*testHandler)(nil)
+
+func (h *testHandler) Handle(e *Event) {
+	h.events <- e
 }

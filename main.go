@@ -53,8 +53,6 @@ func main() {
 
 	go backends.Run(nil)
 
-	events := make(chan *control.Event)
-	controls.Events = events
 	go controls.Run(nil)
 	log.AddHook(&controls)
 

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"compress/gzip"
+	"encoding/json"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,68 +22,43 @@ import (
 type Client struct {
 	http.Client
 	bytes.Buffer
-	sync.RWMutex
+	sync.Mutex
 
-	URL  *url.URL
-	Quit chan struct{}
+	URL *url.URL
 
-	// in
 	LastEventID string
 	Retry       time.Duration
-	Events      chan *Event
 
-	// out
-	Interval time.Duration
+	// test seam
+	Handler
 }
 
+type Handler interface {
+	Handle(*Event)
+}
+
+var _ Handler = (*Client)(nil)
+
 // Run runs the client.
-func (c *Client) Run(ch chan<- struct{}) {
+func (c *Client) Run(q chan struct{}) {
 	log.WithFields(log.Fields{
 		"control": c.URL,
 	}).Info("Will respond to events from a control server")
 
-	if ch != nil {
-		ch <- struct{}{}
-	}
+	// Run once as soon as possible.
+	c.readEventStream(q)
 
-	wq := make(chan struct{})
-	go c.write(wq)
-	rq := make(chan struct{})
-	go c.read(rq)
-	<-c.Quit
-	wq <- struct{}{}
-	rq <- struct{}{}
-}
-
-func (c *Client) write(q <-chan struct{}) {
 	for {
-		c.RLock()
-		d := c.Interval
-		c.RUnlock()
 		select {
-		case <-time.After(d):
-			if err := c.Flush(); err != nil {
-				log.WithFields(log.Fields{
-					"error": err,
-				}).Warn("Failed to flush")
-			}
 		case <-q:
-			return
+			break
+		case <-time.After(c.Retry):
+			c.readEventStream(q)
 		}
 	}
 }
 
-func (c *Client) read(q <-chan struct{}) {
-	for {
-		c.readEventStream(q)
-		c.RLock()
-		d := c.Retry
-		c.RUnlock()
-		time.Sleep(d)
-	}
-}
-
-func (c *Client) readEventStream(q <-chan struct{}) {
+func (c *Client) readEventStream(q chan struct{}) {
 	resp, err := c.Client.Get(c.URL.String())
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -101,58 +78,92 @@ func (c *Client) readEventStream(q <-chan struct{}) {
 		"status":  resp.StatusCode,
 	}).Info("Opened a stream from a control server")
 
-	done := make(chan struct{})
 	go func() {
 		for {
 			e, err := c.readEvent(resp.Body)
+			if err == io.EOF {
+				break
+			}
 			if err != nil {
 				log.WithFields(log.Fields{
 					"error": err,
 				}).Debug("Failed to readEventStream event stream")
 				break
 			}
-			c.Events <- e
+
+			if c.Handler == nil {
+				c.Handler = c
+			}
+
+			c.Handler.Handle(e)
 		}
-		done <- struct{}{}
+		q <- struct{}{}
 	}()
 
-	select {
-	case <-q:
-	case <-done:
-	}
+	q <- <-q
 }
 
 func (c *Client) String() string {
 	return c.URL.String()
 }
 
-// Flush sends the contents of log buffer to the control server.
-func (c *Client) Flush() error {
+func (c *Client) Handle(e *Event) {
+	log.WithFields(log.Fields{
+		"id":    e.ID,
+		"event": e.Event,
+		"data":  e.Data,
+	}).Debug("Will handle an event")
+
+	switch e.Event {
+	case "report":
+		var args struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(e.Data, &args); err != nil {
+			log.WithFields(log.Fields{
+				"error": err,
+			}).Error("Failed to unmarshal report args")
+			break
+		}
+		u, err := url.Parse(args.URL)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"error": err,
+			}).Error("Failed to parse report url")
+			break
+		}
+		if err := c.Report(c.URL.ResolveReference(u)); err != nil {
+			log.WithFields(log.Fields{
+				"error": err,
+			}).Error("Failed to report")
+			break
+		}
+	}
+}
+
+// Report sends the contents of log buffer to the control server.
+func (c *Client) Report(u *url.URL) error {
 	c.Lock()
 	defer c.Unlock()
 
-	req, err := http.NewRequest(http.MethodPost, c.URL.String(), c)
-	if err != nil {
-		log.WithFields(log.Fields{
-			"client": c.String(),
-		}).Debug("Failed to create a new request")
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(c.Bytes()); err != nil {
+		return err
+	}
+	if err := gz.Close(); err != nil {
+		return err
+	}
 
+	req, err := http.NewRequest(http.MethodPost, u.String(), &buf)
+	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
+	req.Header.Set("Content-Encoding", "gzip")
 
-	resp, err := c.Do(req)
-	if err != nil {
+	if _, err := c.Do(req); err != nil {
 		return err
-	}
-
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusCreated, http.StatusAccepted, http.StatusAlreadyReported:
-	default:
-		log.WithFields(log.Fields{
-			"control": c.URL,
-			"status":  resp.StatusCode,
-		}).Warn("Failed to report")
 	}
 
 	c.Reset()
@@ -178,17 +189,22 @@ func (c *Client) readEvent(r io.Reader) (*Event, error) {
 		l := s.Text()
 
 		// end of event
-		if len(l) == 0 {
+		if l == "" {
 			break
 		}
 
 		ms := commentOrField.FindStringSubmatch(l)
-		field := ms[1]
-		value := ms[2]
+
+		var field, value string
+		if len(ms) == 0 {
+			field = l
+			value = ""
+		} else {
+			field = ms[1]
+			value = ms[2]
+		}
 
 		switch field {
-		case "": // comment
-			continue
 		case "event":
 			e.Event = string(value)
 		case "data":
@@ -213,7 +229,6 @@ func (c *Client) readEvent(r io.Reader) (*Event, error) {
 // ClientPool is a set of clients.
 type ClientPool struct {
 	Clients   []*Client
-	Events    chan *Event
 	Formatter log.JSONFormatter
 }
 
@@ -232,9 +247,8 @@ func (p *ClientPool) Set(s string) error {
 	}
 
 	p.Add(&Client{
-		URL:      u,
-		Retry:    10 * time.Second,
-		Interval: time.Minute,
+		URL:   u,
+		Retry: 10 * time.Second,
 	})
 
 	return nil
@@ -249,13 +263,12 @@ func (p *ClientPool) Add(c *Client) {
 }
 
 // Run runs all the clients in the pool.
-func (p *ClientPool) Run(ch chan<- struct{}) {
+func (p *ClientPool) Run(q chan struct{}) {
 	var wg sync.WaitGroup
 	for _, c := range p.Clients {
 		wg.Add(1)
 		go func(c *Client) {
-			c.Events = p.Events
-			c.Run(ch)
+			c.Run(q)
 			wg.Done()
 		}(c)
 	}
@@ -264,7 +277,13 @@ func (p *ClientPool) Run(ch chan<- struct{}) {
 
 // Levels returns log levels that control servers are aware of.
 func (p *ClientPool) Levels() []log.Level {
-	return log.AllLevels
+	return []log.Level{
+		log.PanicLevel,
+		log.FatalLevel,
+		log.ErrorLevel,
+		log.WarnLevel,
+		log.InfoLevel,
+	}
 }
 
 // Fire put log entries in JSON format to the control clients' buffers.

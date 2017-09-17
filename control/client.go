@@ -3,6 +3,7 @@ package control
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"compress/gzip"
-	"encoding/json"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -33,6 +32,7 @@ type Client struct {
 	Handler
 }
 
+// Handler handles events.
 type Handler interface {
 	Handle(*Event)
 }
@@ -43,7 +43,7 @@ var _ Handler = (*Client)(nil)
 func (c *Client) Run(q chan struct{}) {
 	log.WithFields(log.Fields{
 		"control": c.URL,
-	}).Info("Will respond to events from a control server")
+	}).Debug("Will respond to events from a control server")
 
 	// Run once as soon as possible.
 	c.readEventStream(q)
@@ -107,6 +107,7 @@ func (c *Client) String() string {
 	return c.URL.String()
 }
 
+// Handle handles events.
 func (c *Client) Handle(e *Event) {
 	log.WithFields(log.Fields{
 		"id":    e.ID,
@@ -146,21 +147,11 @@ func (c *Client) Report(u *url.URL) error {
 	c.Lock()
 	defer c.Unlock()
 
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(c.Bytes()); err != nil {
-		return err
-	}
-	if err := gz.Close(); err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, u.String(), &buf)
+	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(c.Buffer.Bytes()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-ndjson")
-	req.Header.Set("Content-Encoding", "gzip")
 
 	if _, err := c.Do(req); err != nil {
 		return err

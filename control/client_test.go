@@ -1,7 +1,6 @@
 package control
 
 import (
-	"compress/gzip"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"io/ioutil"
@@ -159,29 +158,17 @@ func TestClient_Report(t *testing.T) {
 
 	for i, ts := range testCases {
 		s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			contentEncoding := r.Header.Get("Content-Encoding")
-			if "gzip" != contentEncoding {
-				t.Errorf("(%d) expected: gzip, got: %s", i, contentEncoding)
-			}
-
-			gz, err := gzip.NewReader(r.Body)
-			if err != nil {
-				t.Errorf("(%d) failed to real gzip: %v", i, err)
-			}
-
-			b, err := ioutil.ReadAll(gz)
+			b, err := ioutil.ReadAll(r.Body)
 			if err != nil {
 				t.Errorf("(%d) failed to read all: %v", i, err)
 			}
+			defer r.Body.Close()
 
 			if string(ts.buffer) != string(b) {
 				t.Errorf("(%d) expected: %s, got: %s", i, string(ts.buffer), string(b))
 			}
 
 			w.WriteHeader(http.StatusOK)
-			if err := gz.Close(); err != nil {
-				t.Errorf("(%d) failed to close gzip: %v", i, err)
-			}
 		}))
 
 		u, err := url.Parse(s.URL)

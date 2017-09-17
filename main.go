@@ -13,6 +13,7 @@ import (
 	"github.com/ichiban/jesi/conditional"
 	"github.com/ichiban/jesi/control"
 	"github.com/ichiban/jesi/embed"
+	"github.com/ichiban/jesi/transaction"
 )
 
 var version string
@@ -81,14 +82,26 @@ func (p *ReverseProxy) Run() {
 	handler = &balance.Handler{
 		BackendPool: p.Backends,
 	}
+	handler = &transaction.Handler{
+		Type: "up",
+		Next: handler,
+	}
 	handler = &cache.Handler{
 		Next:  handler,
 		Store: p.Store,
+	}
+	handler = &transaction.Handler{
+		Type: "internal",
+		Next: handler,
 	}
 	handler = &embed.Handler{
 		Next: handler,
 	}
 	handler = &conditional.Handler{
+		Next: handler,
+	}
+	handler = &transaction.Handler{
+		Type: "down",
 		Next: handler,
 	}
 	server := http.Server{

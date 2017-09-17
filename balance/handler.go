@@ -5,7 +5,7 @@ import (
 	"net/http/httputil"
 	"path"
 
-	"github.com/ichiban/jesi/request"
+	"github.com/ichiban/jesi/transaction"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,16 +30,16 @@ func (h *Handler) direct(r *http.Request) {
 
 	if b == nil {
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
+			"id": transaction.ID(r),
 		}).Warn("Couldn't find a backend in the pool")
 
 		return
 	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
+		"id":      transaction.ID(r),
 		"backend": b,
-	}).Info("Picked up a backend from the pool")
+	}).Debug("Picked up a backend from the pool")
 
 	r.URL.Scheme = b.URL.Scheme
 	r.URL.Host = b.URL.Host
@@ -55,7 +55,7 @@ func (h *Handler) direct(r *http.Request) {
 	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
-		"url":     r.URL,
-	}).Info("Directed a request to a backend")
+		"id":  transaction.ID(r),
+		"url": r.URL,
+	}).Debug("Directed a request to a backend")
 }

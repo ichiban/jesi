@@ -1,11 +1,10 @@
-package request
+package transaction
 
 import (
 	"context"
 	"net/http"
 
 	"github.com/satori/go.uuid"
-	log "github.com/sirupsen/logrus"
 )
 
 // Key is an identifier of a context value associated with requests.
@@ -23,28 +22,7 @@ var genID = func() string {
 // WithID returns a request with unique ID based on a given request.
 func WithID(r *http.Request) *http.Request {
 	rid := genID()
-	req := r.WithContext(context.WithValue(r.Context(), IDKey, rid))
-
-	log.WithFields(log.Fields{
-		"request":        rid,
-		"method":         r.Method,
-		"host":           r.Host,
-		"url":            r.URL,
-		"content_length": r.ContentLength,
-		"remote_addr":    r.RemoteAddr,
-	}).Info("Identified a request")
-
-	for k, vs := range r.Header {
-		for _, v := range vs {
-			log.WithFields(log.Fields{
-				"request": rid,
-				"field":   k,
-				"value":   v,
-			}).Info("Found a request header")
-		}
-	}
-
-	return req
+	return r.WithContext(context.WithValue(r.Context(), IDKey, rid))
 }
 
 // ID returns a unique ID of the request.

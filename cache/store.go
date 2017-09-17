@@ -75,7 +75,7 @@ func (s *Store) Set(req *http.Request, cached *Representation) {
 		log.WithFields(log.Fields{
 			"inuse": stats.HeapInuse,
 			"max":   s.Max,
-		}).Info("Read memory stats")
+		}).Debug("Read memory stats")
 
 		if stats.HeapInuse < maxInBytes {
 			break

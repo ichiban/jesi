@@ -42,7 +42,7 @@ func (r *Representation) WriteHeader(code int) {
 }
 
 // WriteTo writes out the contents of the buffer to io.Writer.
-// it also writes status code and header if w is an http.ResponseWriter.
+// it also writes status code and header if w is an http.responseWriter.
 func (r *Representation) WriteTo(w io.Writer) (int64, error) {
 	rw, ok := w.(http.ResponseWriter)
 	if !ok {

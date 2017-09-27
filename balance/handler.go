@@ -2,27 +2,25 @@ package balance
 
 import (
 	"net/http"
-	"net/http/httputil"
 	"path"
 
-	"github.com/ichiban/jesi/transaction"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/ichiban/jesi/transaction"
 )
 
 // Handler is a reverse proxy with multiple backends.
 type Handler struct {
-	httputil.ReverseProxy
 	*BackendPool
+
+	Next http.Handler
 }
 
 var _ http.Handler = (*Handler)(nil)
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.Director == nil {
-		h.Director = h.direct
-	}
-
-	h.ReverseProxy.ServeHTTP(w, r)
+	h.direct(r)
+	h.Next.ServeHTTP(w, r)
 }
 
 func (h *Handler) direct(r *http.Request) {

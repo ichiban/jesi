@@ -124,7 +124,7 @@ type document struct {
 	data interface{}
 }
 
-func (h *Handler) embed(req *http.Request, doc *document, spec specifier) {
+func (h *Handler) embed(base *http.Request, doc *document, spec specifier) {
 	if len(spec) == 0 {
 		return
 	}
@@ -151,14 +151,14 @@ func (h *Handler) embed(req *http.Request, doc *document, spec specifier) {
 		switch l := l.(type) {
 		case map[string]interface{}:
 			count++
-			go h.fetch(req, edge, nil, l[href].(string), next, ch)
+			go h.fetch(base, edge, nil, l[href].(string), next, ch)
 		case []interface{}:
 			es[edge] = make([]interface{}, len(l))
 			for i, l := range l {
 				i := i
 				l := l.(map[string]interface{})
 				count++
-				go h.fetch(req, edge, &i, l[href].(string), next, ch)
+				go h.fetch(base, edge, &i, l[href].(string), next, ch)
 			}
 		}
 	}
@@ -195,7 +195,11 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		return
 	}
 	req = req.WithContext(base.Context())
-	req.Header = base.Header
+	for k, vs := range base.Header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
 
 	var rep cache.Representation
 	h.Next.ServeHTTP(&rep, req)
@@ -215,7 +219,7 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		CacheControl: NewCacheControl(&rep),
 		data:         data,
 	}
-	h.embed(req, doc, next)
+	h.embed(base, doc, next)
 
 	ch <- &document{
 		CacheControl: doc.CacheControl,

@@ -38,7 +38,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	log.WithFields(log.Fields{
 		"id":             id,
-		"url":            r.URL,
 		"status":         rw.status,
 		"content_length": rw.contentLength,
 		"header":         rw.Header(),

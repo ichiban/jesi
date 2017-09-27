@@ -67,9 +67,9 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 		h := Handler{BackendPool: &p}
 
-		rt := testRoundTripper{}
+		th := &testHandler{}
 
-		h.ReverseProxy.Transport = &rt
+		h.Next = th
 
 		for i := 0; i < tc.numReqs; i++ {
 			var rep cache.Representation
@@ -79,17 +79,38 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			})
 		}
 
-		if len(tc.directed) != len(rt.urls) {
-			t.Errorf("(%d) expect: %d, got: %d", i, len(tc.directed), len(rt.urls))
+		if len(tc.directed) != len(th.urls) {
+			t.Errorf("(%d) expect: %d, got: %d", i, len(tc.directed), len(th.urls))
 			continue
 		}
 
 		for j, u := range tc.directed {
-			if u.String() != rt.urls[j].String() {
-				t.Errorf("(%d) expect: %s, got: %s", i, u, rt.urls[j])
+			if u.String() != th.urls[j].String() {
+				t.Errorf("(%d) expect: %s, got: %s", i, u, th.urls[j])
 			}
 		}
 	}
+}
+
+type testHandler struct {
+	statuses []int
+	urls     []url.URL
+}
+
+var _ http.Handler = (*testHandler)(nil)
+
+func (t *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	t.urls = append(t.urls, *r.URL)
+
+	var status int
+	if len(t.statuses) == 0 {
+		status = http.StatusOK
+	} else {
+		status = t.statuses[0]
+		t.statuses = t.statuses[1:]
+	}
+
+	w.WriteHeader(status)
 }
 
 type testRoundTripper struct {

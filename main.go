@@ -13,6 +13,7 @@ import (
 	"github.com/ichiban/jesi/conditional"
 	"github.com/ichiban/jesi/control"
 	"github.com/ichiban/jesi/embed"
+	"github.com/ichiban/jesi/forward"
 	"github.com/ichiban/jesi/transaction"
 )
 
@@ -79,12 +80,16 @@ type ReverseProxy struct {
 // Run runs the reverse proxy.
 func (p *ReverseProxy) Run() {
 	var handler http.Handler
-	handler = &balance.Handler{
-		BackendPool: p.Backends,
+	handler = &forward.Handler{
+		Transport: http.DefaultTransport,
 	}
 	handler = &transaction.Handler{
 		Type: "up",
 		Next: handler,
+	}
+	handler = &balance.Handler{
+		BackendPool: p.Backends,
+		Next:        handler,
 	}
 	handler = &cache.Handler{
 		Next:  handler,

@@ -14,6 +14,7 @@ import (
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
+		node       *Node
 		backends   []*Backend
 		givenReqs  []*http.Request
 		givenResps []*http.Response
@@ -139,7 +140,10 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 		},
-		{ // with RemoteAddr, Host, and TLS
+		{ // with Node, RemoteAddr, Host, and TLS
+			node: &Node{
+				ID: "_d3d2e741-5d38-4356-8df4-b1d019bd634e",
+			},
 			backends: []*Backend{
 				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
 			},
@@ -172,7 +176,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 						"X-Forwarded-For":   []string{"192.0.2.1"},
 						"X-Forwarded-Host":  []string{"example.com"},
 						"X-Forwarded-Proto": []string{"https"},
-						"Forwarded":         []string{`for="192.0.2.1:12345";host=example.com;proto=https`},
+						"Forwarded":         []string{`by=_d3d2e741-5d38-4356-8df4-b1d019bd634e;for="192.0.2.1:12345";host=example.com;proto=https`},
 					},
 				},
 			},
@@ -373,6 +377,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			}
 
 			handler := &Handler{
+				Node:        tc.node,
 				BackendPool: &p,
 				Next:        h,
 			}

@@ -22,6 +22,7 @@ var version string
 func main() {
 	var profile string
 	var proxy ReverseProxy
+	var node balance.Node
 	var backends balance.BackendPool
 	var store cache.Store
 	var verbose bool
@@ -29,6 +30,7 @@ func main() {
 
 	flag.StringVar(&profile, "profile", "", "run debug profiler")
 	flag.IntVar(&proxy.Port, "port", 8080, "port number")
+	flag.Var(&node, "node", "node identifier (e.g. _jesi)")
 	flag.Var(&backends, "backend", "backend servers")
 	flag.IntVar(&store.Max, "max", 64, "max cache size in MB")
 	flag.BoolVar(&verbose, "verbose", false, "log extra information")
@@ -61,10 +63,12 @@ func main() {
 	log.WithFields(log.Fields{
 		"version": version,
 		"port":    proxy.Port,
+		"node":    &node,
 		"max":     store.Max,
 		"verbose": verbose,
 	}).Info("Start a server")
 
+	proxy.Node = &node
 	proxy.Backends = &backends
 	proxy.Store = &store
 	proxy.Run()
@@ -72,6 +76,7 @@ func main() {
 
 // ReverseProxy handles requests from downstream.
 type ReverseProxy struct {
+	Node     *balance.Node
 	Port     int
 	Backends *balance.BackendPool
 	Store    *cache.Store
@@ -88,6 +93,7 @@ func (p *ReverseProxy) Run() {
 		Next: handler,
 	}
 	handler = &balance.Handler{
+		Node:        p.Node,
 		BackendPool: p.Backends,
 		Next:        handler,
 	}

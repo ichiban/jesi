@@ -3,11 +3,9 @@ package balance
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -32,6 +30,7 @@ var (
 
 // Handler is a reverse proxy with multiple backends.
 type Handler struct {
+	*Node
 	*BackendPool
 
 	Next http.Handler
@@ -46,7 +45,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	removeHopByHops(r.Header)
-	addForwarded(r)
+	h.addForwarded(r)
 	addXForwarded(r)
 	h.Next.ServeHTTP(w, r)
 	removeHopByHops(w.Header())
@@ -136,8 +135,8 @@ func addXForwardedFor(r *http.Request) {
 		return
 	}
 	addrs := r.Header[xForwardedFor]
-	if n, err := parseNode(r.RemoteAddr); err == nil {
-		n.port = nil // omit port
+	if n, err := ParseNode(r.RemoteAddr); err == nil {
+		n.Port = nil // omit port
 		addrs = append(addrs, n.String())
 	}
 	r.Header.Set(xForwardedFor, strings.Join(addrs, ", "))
@@ -171,10 +170,10 @@ func addXForwardedProto(r *http.Request) {
 }
 
 // https://tools.ietf.org/html/rfc7239
-func addForwarded(r *http.Request) {
+func (h *Handler) addForwarded(r *http.Request) {
 	convertXForwardedFor(r)
 
-	e, err := newElement(r)
+	e, err := h.newElement(r)
 	if err != nil {
 		return
 	}
@@ -184,19 +183,21 @@ func addForwarded(r *http.Request) {
 }
 
 type element struct {
-	By    *node
-	For   *node
+	By    *Node
+	For   *Node
 	Host  string
 	Proto string
 }
 
-func newElement(r *http.Request) (*element, error) {
+func (h *Handler) newElement(r *http.Request) (*element, error) {
 	var e element
 
-	// TODO: by
+	if h.Node != nil {
+		e.By = h.Node
+	}
 
 	if r.RemoteAddr != "" {
-		n, err := parseNode(r.RemoteAddr)
+		n, err := ParseNode(r.RemoteAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -248,11 +249,11 @@ func convertXForwardedFor(r *http.Request) {
 
 	vs := r.Header[xForwardedFor]
 
-	var ns []*node
+	var ns []*Node
 	for _, v := range vs {
 		pairs := strings.Split(v, ",")
 		for _, pair := range pairs {
-			n, err := parseNode(strings.TrimSpace(pair))
+			n, err := ParseNode(strings.TrimSpace(pair))
 			if err != nil {
 				return
 			}
@@ -263,67 +264,4 @@ func convertXForwardedFor(r *http.Request) {
 	for _, n := range ns {
 		r.Header[forwarded] = append(r.Header[forwarded], (&element{For: n}).String())
 	}
-}
-
-type node struct {
-	ident string
-	ip    net.IP
-	port  *int
-}
-
-func parseNode(s string) (*node, error) {
-	m := nodePattern.FindStringSubmatch(s)
-	name := m[1]
-	port := m[2]
-
-	var n node
-	if port != "" {
-		p, err := strconv.Atoi(port)
-		if err != nil {
-			return nil, err
-		}
-		n.port = &p
-	}
-
-	// "unknown" Identifier
-	if "unknown" == name {
-		n.ident = name
-		return &n, nil
-	}
-
-	// Obfuscated Identifier
-	if obfuscated.MatchString(name) {
-		n.ident = name
-		return &n, nil
-	}
-
-	// strip []
-	if strings.HasPrefix(name, `[`) {
-		name = name[1 : len(name)-1]
-	}
-
-	n.ip = net.ParseIP(name)
-	if n.ip == nil {
-		return nil, fmt.Errorf("failed to parse: %s", name)
-	}
-	return &n, nil
-}
-
-func (n *node) String() string {
-	var s string
-
-	if n.ident != "" {
-		s = n.ident
-	} else {
-		s = n.ip.String()
-		if n.ip.To4() == nil { // v6
-			s = fmt.Sprintf("[%s]", s)
-		}
-	}
-
-	if n.port != nil {
-		s = fmt.Sprintf("%s:%d", s, *n.port)
-	}
-
-	return s
 }

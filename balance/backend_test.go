@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"testing"
 	"time"
+	"io/ioutil"
+	"bytes"
 )
 
 func TestBackend_Probe(t *testing.T) {
@@ -400,4 +402,29 @@ func TestBackendPool_Run(t *testing.T) {
 			}
 		}
 	}
+}
+
+type testRoundTripper struct {
+	statuses []int
+	urls     []url.URL
+}
+
+var _ http.RoundTripper = (*testRoundTripper)(nil)
+
+func (t *testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.urls = append(t.urls, *req.URL)
+
+	var status int
+	if len(t.statuses) == 0 {
+		status = http.StatusOK
+	} else {
+		status = t.statuses[0]
+		t.statuses = t.statuses[1:]
+	}
+
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{},
+		Body:       ioutil.NopCloser(bytes.NewBuffer(nil)),
+	}, nil
 }

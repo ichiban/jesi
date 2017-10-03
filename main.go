@@ -26,7 +26,7 @@ func main() {
 	var backends balance.BackendPool
 	var store cache.Store
 	var verbose bool
-	var controls control.ClientPool
+	var secret string
 
 	flag.StringVar(&profile, "profile", "", "run debug profiler")
 	flag.IntVar(&proxy.Port, "port", 8080, "port number")
@@ -34,7 +34,7 @@ func main() {
 	flag.Var(&backends, "backend", "backend servers")
 	flag.IntVar(&store.Max, "max", 64, "max cache size in MB")
 	flag.BoolVar(&verbose, "verbose", false, "log extra information")
-	flag.Var(&controls, "control", "control servers")
+	flag.StringVar(&secret, "secret", "", "bearer token")
 	flag.Parse()
 
 	if profile != "" {
@@ -55,10 +55,9 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	go backends.Run(nil)
+	log.AddHook(&proxy.LogStream)
 
-	go controls.Run(nil)
-	log.AddHook(&controls)
+	go backends.Run(nil)
 
 	log.WithFields(log.Fields{
 		"version": version,
@@ -71,6 +70,7 @@ func main() {
 	proxy.Node = &node
 	proxy.Backends = &backends
 	proxy.Store = &store
+	proxy.Secret = secret
 	proxy.Run()
 }
 
@@ -80,6 +80,8 @@ type ReverseProxy struct {
 	Port     int
 	Backends *balance.BackendPool
 	Store    *cache.Store
+	Secret   string
+	control.LogStream
 }
 
 // Run runs the reverse proxy.
@@ -110,6 +112,11 @@ func (p *ReverseProxy) Run() {
 	}
 	handler = &conditional.Handler{
 		Next: handler,
+	}
+	handler = &control.Handler{
+		Secret:    p.Secret,
+		LogStream: &p.LogStream,
+		Next:      handler,
 	}
 	handler = &transaction.Handler{
 		Type: "down",

@@ -25,7 +25,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"parent":         parent,
 		"method":         r.Method,
 		"host":           r.Host,
-		"url":            r.URL,
+		"url":            r.URL.String(),
 		"content_length": r.ContentLength,
 		"remote_addr":    r.RemoteAddr,
 		"header":         r.Header,
@@ -51,6 +51,9 @@ type responseWriter struct {
 	contentLength int64
 }
 
+var _ http.ResponseWriter = (*responseWriter)(nil)
+var _ http.Flusher = (*responseWriter)(nil)
+
 func (w *responseWriter) WriteHeader(s int) {
 	w.status = s
 	w.ResponseWriter.WriteHeader(s)
@@ -60,4 +63,8 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.contentLength += int64(n)
 	return n, err
+}
+
+func (w *responseWriter) Flush() {
+	w.ResponseWriter.(http.Flusher).Flush()
 }

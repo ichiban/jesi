@@ -114,8 +114,9 @@ func (p *ReverseProxy) Run() {
 		Next: handler,
 	}
 	handler = &control.Handler{
-		Secret:    p.Secret,
 		LogStream: &p.LogStream,
+		Store:     p.Store,
+		Secret:    p.Secret,
 		Next:      handler,
 	}
 	handler = &transaction.Handler{

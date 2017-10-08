@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sync"
 
+	"github.com/ichiban/jesi/cache"
 	"github.com/ichiban/jesi/transaction"
 	log "github.com/sirupsen/logrus"
 )
@@ -20,6 +21,7 @@ var (
 // Handler handles control requests with bearer token.
 type Handler struct {
 	*LogStream
+	*cache.Store
 
 	Secret string
 	Next   http.Handler
@@ -57,8 +59,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "PURGE":
-		// TODO: purge cache
-		w.WriteHeader(http.StatusNotFound)
+		h.handlePurge(w, r)
 	case http.MethodGet:
 		switch r.URL.Path {
 		case "/logs":
@@ -72,6 +73,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+func (h *Handler) handlePurge(w http.ResponseWriter, r *http.Request) {
+	h.Purge(r)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {

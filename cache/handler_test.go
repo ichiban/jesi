@@ -84,9 +84,9 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Next: &testHandler{},
 				Store: &Store{
 					Resources: map[ResourceKey]*Resource{
-						ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+						ResourceKey{Host: "www.example.com", Path: "/test"}: {
 							Representations: map[RepresentationKey]*Representation{
-								"": {
+								{Method: http.MethodGet, Key: ""}: {
 									StatusCode: http.StatusOK,
 									HeaderMap: http.Header{
 										"Cache-Control": []string{"s-maxage=600"},

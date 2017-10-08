@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/satori/go.uuid"
 )
 
 // Representation is a buffered response.
 type Representation struct {
 	sync.RWMutex
+	ID           uuid.UUID
 	StatusCode   int
 	HeaderMap    http.Header
 	Body         []byte

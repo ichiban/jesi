@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ichiban/jesi/transaction"
+	"github.com/satori/go.uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -37,10 +38,6 @@ var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns a cached response if found. Otherwise, retrieves one from the underlying handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.WithFields(log.Fields{
-		"request": r.URL,
-	}).Debug("Will serve a cached response if exists")
-
 	cached := h.Get(r)
 	state, delta := h.State(r, cached)
 
@@ -48,7 +45,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"id":    transaction.ID(r),
 		"state": state,
 		"delta": delta,
-	}).Debug("Got a state of a cached response")
+	}).Debug("Got a state of a representation")
 
 	switch state {
 	case Fresh:
@@ -77,6 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	origReq.URL = &origURL
 
 	var rep Representation
+	rep.ID = uuid.NewV4()
 	rep.RequestTime = time.Now()
 	h.Next.ServeHTTP(&rep, r)
 	rep.ResponseTime = time.Now()

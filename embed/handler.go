@@ -43,8 +43,7 @@ var _ http.Handler = (*Handler)(nil)
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	spec := stripSpec(r)
 
-	var rep cache.Representation
-	h.Next.ServeHTTP(&rep, r)
+	rep := cache.NewRepresentation(h.Next, r)
 	defer func() {
 		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
@@ -64,7 +63,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doc := &document{
-		CacheControl: NewCacheControl(&rep),
+		CacheControl: NewCacheControl(rep),
 		data:         data,
 	}
 	h.embed(r, doc, spec)
@@ -201,11 +200,9 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		}
 	}
 
-	var rep cache.Representation
-	h.Next.ServeHTTP(&rep, req)
-
+	rep := cache.NewRepresentation(h.Next, req)
 	if !rep.Successful() {
-		ch <- errorDocument(edge, pos, NewResponseError(&rep, uri))
+		ch <- errorDocument(edge, pos, NewResponseError(rep, uri))
 		return
 	}
 
@@ -216,7 +213,7 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 	}
 
 	doc := &document{
-		CacheControl: NewCacheControl(&rep),
+		CacheControl: NewCacheControl(rep),
 		data:         data,
 	}
 	h.embed(base, doc, next)

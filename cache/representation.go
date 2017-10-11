@@ -25,6 +25,16 @@ type Representation struct {
 var _ http.ResponseWriter = (*Representation)(nil)
 var _ io.WriterTo = (*Representation)(nil)
 
+// NewRepresentation creates a new representation from a handler and request.
+func NewRepresentation(h http.Handler, r *http.Request) *Representation {
+	var rep Representation
+	rep.ID = uuid.NewV4()
+	rep.RequestTime = time.Now()
+	h.ServeHTTP(&rep, r)
+	rep.ResponseTime = time.Now()
+	return &rep
+}
+
 // Header returns HTTP header.
 func (r *Representation) Header() http.Header {
 	if r.HeaderMap == nil {

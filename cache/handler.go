@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ichiban/jesi/transaction"
-	"github.com/satori/go.uuid"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/ichiban/jesi/transaction"
 )
 
 var (
@@ -73,11 +73,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	origURL := *r.URL
 	origReq.URL = &origURL
 
-	var rep Representation
-	rep.ID = uuid.NewV4()
-	rep.RequestTime = time.Now()
-	h.Next.ServeHTTP(&rep, r)
-	rep.ResponseTime = time.Now()
+	rep := NewRepresentation(h.Next, r)
 	defer func() {
 		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
@@ -98,12 +94,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				"id": transaction.ID(r),
 			}).Debug("Will serve a stale response")
 
-			rep = *staleResponse(cached)
+			rep = staleResponse(cached)
 		}
 		return
 	}
 
-	if originChanged(r, &rep) {
+	if originChanged(r, rep) {
 		h.OriginChangedAt = rep.ResponseTime
 
 		log.WithFields(log.Fields{
@@ -112,15 +108,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}).Debug("The origin changed")
 	}
 
-	if revalidated(state, &rep) {
+	if revalidated(state, rep) {
 		log.WithFields(log.Fields{
 			"id": transaction.ID(r),
 		}).Debug("Will serve a revalidated response")
 
-		rep = *revalidatedResponse(&rep, cached)
+		rep = revalidatedResponse(rep, cached)
 	}
 
-	h.cacheIfPossible(&origReq, &rep)
+	h.cacheIfPossible(&origReq, rep)
 }
 
 func serveFresh(w io.Writer, cached *Representation, r *http.Request) {

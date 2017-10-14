@@ -34,6 +34,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 						},
 					},
 				},
+				Store: &Store{},
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
@@ -62,6 +63,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 						},
 					},
 				},
+				Store: &Store{},
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
@@ -80,11 +82,11 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		{ // fetch from store
 			handler: &Handler{
 				Next: &testHandler{},
-				Store: Store{
-					Resource: map[ResourceKey]*Resource{
-						ResourceKey{Method: http.MethodGet, Host: "www.example.com", Path: "/test"}: {
+				Store: &Store{
+					Resources: map[ResourceKey]*Resource{
+						ResourceKey{Host: "www.example.com", Path: "/test"}: {
 							Representations: map[RepresentationKey]*Representation{
-								"": {
+								{Method: http.MethodGet, Key: ""}: {
 									StatusCode: http.StatusOK,
 									HeaderMap: http.Header{
 										"Cache-Control": []string{"s-maxage=600"},
@@ -544,7 +546,7 @@ func TestHandler_State(t *testing.T) {
 	}
 
 	for i, tc := range testCases {
-		h := Handler{Store: Store{OriginChangedAt: tc.originChangedAt}}
+		h := Handler{Store: &Store{OriginChangedAt: tc.originChangedAt}}
 		s, d := h.State(tc.req, tc.cached)
 
 		if tc.state != s {

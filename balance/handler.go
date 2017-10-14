@@ -1,52 +1,73 @@
 package balance
 
 import (
-	"container/list"
-	"flag"
+	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"path"
+	"regexp"
 	"strings"
-	"sync"
-	"time"
 
-	"github.com/ichiban/jesi/request"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/ichiban/jesi/transaction"
+)
+
+const (
+	xForwardedFor   = "X-Forwarded-For"
+	xForwardedHost  = "X-Forwarded-Host"
+	xForwardedProto = "X-Forwarded-Proto"
+	forwarded       = "Forwarded"
+	connection      = "Connection"
+)
+
+var (
+	hopByHopFields = regexp.MustCompile(`\A(?i:Connection|Keep-Alive|Proxy-Authenticate|Proxy-Authorization|TE|Trailer|Transfer-Encoding|Upgrade)\z`)
+	nodePattern    = regexp.MustCompile(`\A(.+?)(?::(\d*))?\z`)
+	tchar          = regexp.MustCompile("\\A[!#$%&'*+\\-.^_`\\|~[:alnum:]]*\\z")
+	obfuscated     = regexp.MustCompile(`\A_[[:alnum:]._-]*\z`)
 )
 
 // Handler is a reverse proxy with multiple backends.
 type Handler struct {
-	httputil.ReverseProxy
+	*Node
 	*BackendPool
+
+	Next http.Handler
 }
 
 var _ http.Handler = (*Handler)(nil)
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if h.Director == nil {
-		h.Director = h.direct
+	r = cloneReq(r)
+	if err := h.direct(r); err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		return
 	}
-
-	h.ReverseProxy.ServeHTTP(w, r)
+	removeHopByHops(r.Header)
+	h.addForwarded(r)
+	addXForwarded(r)
+	h.Next.ServeHTTP(w, r)
+	removeHopByHops(w.Header())
 }
 
-func (h *Handler) direct(r *http.Request) {
+var errBackendNotFound = errors.New("backend not found")
+
+func (h *Handler) direct(r *http.Request) error {
 	b := h.BackendPool.Next()
 
 	if b == nil {
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
-		}).Warn("Couldn't find a backend in the pool")
+			"id": transaction.ID(r),
+		}).Error("Couldn't find a backend in the pool")
 
-		return
+		return errBackendNotFound
 	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
+		"id":      transaction.ID(r),
 		"backend": b,
-	}).Info("Picked up a backend from the pool")
+	}).Debug("Picked up a backend from the pool")
 
 	r.URL.Scheme = b.URL.Scheme
 	r.URL.Host = b.URL.Host
@@ -56,237 +77,191 @@ func (h *Handler) direct(r *http.Request) {
 	} else {
 		r.URL.RawQuery = b.URL.RawQuery + "&" + r.URL.RawQuery
 	}
-	if _, ok := r.Header["User-Agent"]; !ok {
-		// explicitly disable User-Agent so it's not set to default value
-		r.Header.Set("User-Agent", "")
-	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
-		"url":     r.URL,
-	}).Info("Directed a request to a backend")
-}
-
-// Backend represents an upstream server.
-type Backend struct {
-	*list.Element
-	*url.URL
-	http.Client
-
-	Sick     bool
-	Interval time.Duration
-	Timer    <-chan time.Time
-}
-
-func (b *Backend) String() string {
-	return b.URL.String()
-}
-
-// Run keeps probing the backend to keep its state updated.
-// When state changed, it notifies ch.
-func (b *Backend) Run(ch chan<- *Backend, q <-chan struct{}) {
-	log.WithFields(log.Fields{
-		"backend": b,
-	}).Debug("Started probing for a backend")
-
-	if b.Interval == 0 {
-		b.Interval = 10 * time.Second
-	}
-
-	b.Client.Timeout = 10 * time.Second
-
-	for {
-		t := b.Timer
-		if t == nil {
-			log.WithFields(log.Fields{
-				"backend":  b,
-				"interval": b.Interval,
-			}).Debug("Will prove a backend after an interval")
-
-			t = time.After(b.Interval)
-		}
-
-		select {
-		case <-t:
-			old := b.Sick
-			b.Probe()
-			if old != b.Sick {
-				ch <- b
-			}
-		case <-q:
-			log.WithFields(log.Fields{
-				"backend": b,
-			}).Debug("Finished probing for a backend")
-
-			return
-		}
-	}
-}
-
-// Probe makes a probing request to the background and changes its internal state accordingly.
-func (b *Backend) Probe() {
-	log.WithFields(log.Fields{
-		"backend": b,
-	}).Debug("Started a probe into a backend")
-
-	resp, err := b.Get(b.URL.String())
-	if err != nil {
-		log.WithFields(log.Fields{
-			"backend": b,
-			"error":   err,
-		}).Debug("Couldn't get a response from a backend")
-
-		b.Sick = true
-		return
-	}
-
-	log.WithFields(log.Fields{
-		"backend": b,
-		"status":  resp.StatusCode,
-	}).Debug("Got a response from a backend")
-
-	b.Sick = resp.StatusCode >= 400
-}
-
-// BackendPool hold a set of backends.
-type BackendPool struct {
-	sync.RWMutex
-
-	Changed chan *Backend
-	Quit    chan struct{}
-	Healthy list.List
-	Sick    list.List
-
-	http.RoundTripper
-}
-
-var _ flag.Value = (*BackendPool)(nil)
-
-func (p *BackendPool) String() string {
-	p.RLock()
-	defer p.RUnlock()
-
-	var h []string
-	for e := p.Healthy.Front(); e != nil; e = e.Next() {
-		h = append(h, e.Value.(*Backend).String())
-	}
-
-	var s []string
-	for e := p.Sick.Front(); e != nil; e = e.Next() {
-		s = append(s, e.Value.(*Backend).String())
-	}
-
-	return fmt.Sprintf("healthy: [%s], sick: [%s]", strings.Join(h, ", "), strings.Join(s, ", "))
-}
-
-// Set adds a new backend represented by the given URL string.
-func (p *BackendPool) Set(str string) error {
-	uri, err := url.Parse(str)
-	if err != nil {
-		return err
-	}
-
-	b := &Backend{URL: uri}
-	if p.RoundTripper != nil {
-		b.Client.Transport = p.RoundTripper
-	}
-
-	p.Add(b)
+		"id":  transaction.ID(r),
+		"url": r.URL,
+	}).Debug("Directed a request to a backend")
 
 	return nil
 }
 
-// Add adds a backend to the pool.
-// It also starts continuous probing of the backend if the pool is already running.
-func (p *BackendPool) Add(b *Backend) {
-	p.Lock()
-	defer p.Unlock()
-
-	if p.Changed == nil {
-		p.Changed = make(chan *Backend)
-	}
-
-	if p.Quit == nil {
-		p.Quit = make(chan struct{})
-	}
-
-	b.Probe()
-
-	if b.Sick {
-		b.Element = p.Sick.PushBack(b)
-
-		log.WithFields(log.Fields{
-			"backend": b,
-			"queue":   "sick",
-		}).Info("Added a backend")
-	} else {
-		b.Element = p.Healthy.PushBack(b)
-
-		log.WithFields(log.Fields{
-			"backend": b,
-			"queue":   "healthy",
-		}).Info("Added a backend")
-	}
-
-	go b.Run(p.Changed, p.Quit)
-}
-
-// Next picks one of the backends and returns.
-func (p *BackendPool) Next() *Backend {
-	p.Lock()
-	defer p.Unlock()
-
-	e := p.Healthy.Front()
-
-	if e == nil {
-		return nil
-	}
-
-	p.Healthy.MoveToBack(e)
-
-	return e.Value.(*Backend)
-}
-
-// Run keeps watching changes of the backends' states to keep Healthy/Sick queues updated.
-func (p *BackendPool) Run(ch chan struct{}) {
-	if ch != nil {
-		ch <- struct{}{}
-	}
-
-	for {
-		select {
-		case b := <-p.Changed:
-			log.WithFields(log.Fields{
-				"backend": b,
-				"sick":    b.Sick,
-			}).Debug("Detected a change of a backend's status")
-
-			p.Lock()
-			if b.Sick {
-				b.Element = p.Sick.PushBack(p.Healthy.Remove(b.Element))
-
-				log.WithFields(log.Fields{
-					"backend": b,
-					"queue":   "sick",
-				}).Info("Pushed back a backend to a queue")
-			} else {
-				b.Element = p.Healthy.PushBack(p.Sick.Remove(b.Element))
-
-				log.WithFields(log.Fields{
-					"backend": b,
-					"queue":   "healthy",
-				}).Info("Pushed back a backend to a queue")
-			}
-			p.Unlock()
-
-			if ch != nil {
-				ch <- struct{}{}
-			}
-		case <-ch:
-			if p.Quit != nil {
-				close(p.Quit)
-			}
-			return
+func cloneReq(old *http.Request) *http.Request {
+	r := &http.Request{}
+	*r = *old
+	r.Header = http.Header{}
+	for k, vs := range old.Header {
+		for _, v := range vs {
+			r.Header.Add(k, v)
 		}
+	}
+	return r
+}
+
+func removeHopByHops(h http.Header) {
+	var fields []string
+	cs, ok := h[connection]
+	if ok {
+		for _, c := range cs {
+			fs := strings.Split(c, ",")
+			for _, f := range fs {
+				fields = append(fields, strings.TrimSpace(f))
+			}
+		}
+	}
+
+	for k := range h {
+		if hopByHopFields.MatchString(k) {
+			h.Del(k)
+			continue
+		}
+		for _, f := range fields {
+			if strings.EqualFold(k, f) {
+				h.Del(k)
+				break
+			}
+		}
+	}
+}
+
+func addXForwarded(r *http.Request) {
+	addXForwardedFor(r)
+	addXForwardedHost(r)
+	addXForwardedProto(r)
+}
+
+func addXForwardedFor(r *http.Request) {
+	if r.RemoteAddr == "" {
+		return
+	}
+	addrs := r.Header[xForwardedFor]
+	if n, err := ParseNode(r.RemoteAddr); err == nil {
+		n.Port = nil // omit port
+		addrs = append(addrs, n.String())
+	}
+	r.Header.Set(xForwardedFor, strings.Join(addrs, ", "))
+}
+
+func addXForwardedHost(r *http.Request) {
+	if _, ok := r.Header[xForwardedHost]; ok {
+		return
+	}
+
+	if r.Host == "" {
+		return
+	}
+
+	r.Header.Set(xForwardedHost, r.Host)
+}
+
+func addXForwardedProto(r *http.Request) {
+	if _, ok := r.Header[xForwardedProto]; ok {
+		return
+	}
+
+	var proto string
+	if r.TLS == nil {
+		proto = "http"
+	} else {
+		proto = "https"
+	}
+
+	r.Header.Set(xForwardedProto, proto)
+}
+
+// https://tools.ietf.org/html/rfc7239
+func (h *Handler) addForwarded(r *http.Request) {
+	convertXForwardedFor(r)
+
+	e, err := h.newElement(r)
+	if err != nil {
+		return
+	}
+	if e != nil {
+		r.Header[forwarded] = append(r.Header[forwarded], e.String())
+	}
+}
+
+type element struct {
+	By    *Node
+	For   *Node
+	Host  string
+	Proto string
+}
+
+func (h *Handler) newElement(r *http.Request) (*element, error) {
+	var e element
+
+	if h.Node != nil {
+		e.By = h.Node
+	}
+
+	if r.RemoteAddr != "" {
+		n, err := ParseNode(r.RemoteAddr)
+		if err != nil {
+			return nil, err
+		}
+		e.For = n
+	}
+
+	if r.Host != "" {
+		e.Host = r.Host
+	}
+
+	if r.TLS == nil {
+		e.Proto = "http"
+	} else {
+		e.Proto = "https"
+	}
+
+	return &e, nil
+}
+
+func (e *element) String() string {
+	var pairs []string
+	if e.By != nil {
+		pairs = append(pairs, fmt.Sprintf(`by=%s`, tokenOrQuotedString(e.By.String())))
+	}
+	if e.For != nil {
+		pairs = append(pairs, fmt.Sprintf(`for=%s`, tokenOrQuotedString(e.For.String())))
+	}
+	if e.Host != "" {
+		pairs = append(pairs, fmt.Sprintf(`host=%s`, tokenOrQuotedString(e.Host)))
+	}
+	if e.Proto != "" {
+		pairs = append(pairs, fmt.Sprintf(`proto=%s`, tokenOrQuotedString(e.Proto)))
+	}
+	return strings.Join(pairs, ";")
+}
+
+func tokenOrQuotedString(s string) string {
+	if tchar.MatchString(s) {
+		return s
+	}
+	return fmt.Sprintf(`"%s"`, s)
+}
+
+func convertXForwardedFor(r *http.Request) {
+	// the downstream is already using Forwarded, assume conversion is done.
+	if _, ok := r.Header[forwarded]; ok {
+		return
+	}
+
+	vs := r.Header[xForwardedFor]
+
+	var ns []*Node
+	for _, v := range vs {
+		pairs := strings.Split(v, ",")
+		for _, pair := range pairs {
+			n, err := ParseNode(strings.TrimSpace(pair))
+			if err != nil {
+				return
+			}
+			ns = append(ns, n)
+		}
+	}
+
+	for _, n := range ns {
+		r.Header[forwarded] = append(r.Header[forwarded], (&element{For: n}).String())
 	}
 }

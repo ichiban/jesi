@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/ichiban/jesi/cache"
-	"github.com/ichiban/jesi/request"
+	"github.com/ichiban/jesi/transaction"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -26,7 +26,7 @@ var _ http.Handler = (*Handler)(nil)
 // ServeHTTP returns NotModified if ETag matches.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
+		"id": transaction.ID(r),
 	}).Debug("Will serve not modified if so")
 
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -45,8 +45,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
-				"request": request.ID(r),
-				"error":   err,
+				"id":    transaction.ID(r),
+				"error": err,
 			}).Error("Couldn't write a response")
 		}
 	}()

@@ -11,60 +11,55 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/ichiban/jesi/transaction"
 )
 
 // Store stores pairs of requests/responses.
 type Store struct {
 	sync.RWMutex
-	Resource        map[ResourceKey]*Resource
+	Resources       map[ResourceKey]*Resource
 	History         *list.List
-	Max             uint64
+	Max             int
 	OriginChangedAt time.Time
 }
 
 // Set inserts/updates a new pair of request/response to the cache.
-func (s *Store) Set(req *http.Request, cached *Representation) {
+func (s *Store) Set(req *http.Request, rep *Representation) {
 	s.init()
 
 	s.Lock()
 	defer s.Unlock()
 
-	urlKey := NewResourceKey(req)
-	log.WithFields(log.Fields{
-		"method": urlKey.Method,
-		"host":   urlKey.Host,
-		"path":   urlKey.Path,
-		"query":  urlKey.Query,
-	}).Debug("Will set a set of variations to a URL key")
-
-	variations, ok := s.Resource[urlKey]
+	resKey := NewResourceKey(req)
+	res, ok := s.Resources[resKey]
 	if !ok {
-		variations = NewResource(cached)
-		s.Resource[urlKey] = variations
+		res = NewResource(rep)
+		s.Resources[resKey] = res
 	}
 
-	varKey := NewRepresentationKey(variations, req)
-	log.WithFields(log.Fields{
-		"variation": varKey,
-	}).Debug("Will set a cached response to a variation key")
-
-	if old, ok := variations.Representations[varKey]; ok && old.Element != nil {
+	repKey := NewRepresentationKey(res, req)
+	if old, ok := res.Representations[repKey]; ok && old.Element != nil {
 		s.History.Remove(old.Element)
 
 		log.WithFields(log.Fields{
-			"method":    urlKey.Method,
-			"host":      urlKey.Host,
-			"path":      urlKey.Path,
-			"query":     urlKey.Query,
-			"variation": varKey,
-		}).Debug("Removed an old cached response from the history")
+			"id": old.ID,
+		}).Info("Removed a representation")
 	}
-	variations.Representations[varKey] = cached
-	cached.Element = s.History.PushFront(key{resource: urlKey, representation: varKey})
+	res.Representations[repKey] = rep
+
+	log.WithFields(log.Fields{
+		"id":          rep.ID,
+		"transaction": transaction.ID(req),
+	}).Info("Added a representation")
+
+	rep.Element = s.History.PushFront(key{resource: resKey, representation: repKey})
 
 	if s.Max == 0 {
 		return
 	}
+
+	maxInBytes := uint64(s.Max) * 1024 * 1024 // MB
 
 	var stats runtime.MemStats
 	for i := 0; i < s.History.Len(); i++ {
@@ -73,9 +68,9 @@ func (s *Store) Set(req *http.Request, cached *Representation) {
 		log.WithFields(log.Fields{
 			"inuse": stats.HeapInuse,
 			"max":   s.Max,
-		}).Info("Read memory stats")
+		}).Debug("Read memory stats")
 
-		if stats.HeapInuse < s.Max {
+		if stats.HeapInuse < maxInBytes {
 			break
 		}
 
@@ -90,36 +85,27 @@ func (s *Store) evictLRU() {
 		return
 	}
 	s.History.Remove(e)
-	k := e.Value.(key)
+	k, ok := e.Value.(key)
+	if !ok {
+		log.Fatalf("failed to coerce a history element to key: %#v", e.Value)
+	}
 
-	log.WithFields(log.Fields{
-		"method":    k.resource.Method,
-		"host":      k.resource.Host,
-		"path":      k.resource.Path,
-		"query":     k.resource.Query,
-		"variation": k.representation,
-	}).Debug("Will evict a key from the cache")
-
-	pe, ok := s.Resource[k.resource]
+	res, ok := s.Resources[k.resource]
 	if !ok {
 		return
 	}
 
-	if _, ok = pe.Representations[k.representation]; ok {
-		delete(pe.Representations, k.representation)
+	if rep, ok := res.Representations[k.representation]; ok {
+		delete(res.Representations, k.representation)
+
+		log.WithFields(log.Fields{
+			"id": rep.ID,
+		}).Info("Removed a representation")
 	}
 
-	if len(pe.Representations) == 0 {
-		delete(s.Resource, k.resource)
+	if len(res.Representations) == 0 {
+		delete(s.Resources, k.resource)
 	}
-
-	log.WithFields(log.Fields{
-		"method":    k.resource.Method,
-		"host":      k.resource.Host,
-		"path":      k.resource.Path,
-		"query":     k.resource.Query,
-		"variation": k.representation,
-	}).Info("Evicted a key from the cache")
 }
 
 // Get retrieves a cached response.
@@ -129,73 +115,58 @@ func (s *Store) Get(req *http.Request) *Representation {
 	s.RLock()
 	defer s.RUnlock()
 
-	pKey := NewResourceKey(req)
-	log.WithFields(log.Fields{
-		"method": pKey.Method,
-		"host":   pKey.Host,
-		"path":   pKey.Path,
-		"query":  pKey.Query,
-	}).Debug("Will get a set of variations for a URL key")
-
-	pe, ok := s.Resource[pKey]
+	resKey := NewResourceKey(req)
+	res, ok := s.Resources[resKey]
 	if !ok {
-		log.WithFields(log.Fields{
-			"method": pKey.Method,
-			"host":   pKey.Host,
-			"path":   pKey.Path,
-			"query":  pKey.Query,
-		}).Debug("Couldn't get a set of variations for a URL key")
-
 		return nil
 	}
 
-	sKey := NewRepresentationKey(pe, req)
-	log.WithFields(log.Fields{
-		"variation": sKey,
-	}).Debug("Will get a cached response for a variation key")
-
-	cached, ok := pe.Representations[sKey]
+	repKey := NewRepresentationKey(res, req)
+	rep, ok := res.Representations[repKey]
 	if !ok {
-		log.WithFields(log.Fields{
-			"method":    pKey.Method,
-			"host":      pKey.Host,
-			"path":      pKey.Path,
-			"query":     pKey.Query,
-			"variation": sKey,
-		}).Debug("Couldn't get a cached response for the key")
-
 		return nil
 	}
 
-	if cached.Element != nil {
-		s.History.MoveToFront(cached.Element)
-
-		log.WithFields(log.Fields{
-			"method":    pKey.Method,
-			"host":      pKey.Host,
-			"path":      pKey.Path,
-			"query":     pKey.Query,
-			"variation": sKey,
-		}).Debug("Marked a cached response as recently used")
+	if rep.Element != nil {
+		s.History.MoveToFront(rep.Element)
 	}
 
 	log.WithFields(log.Fields{
-		"method":    pKey.Method,
-		"host":      pKey.Host,
-		"path":      pKey.Path,
-		"query":     pKey.Query,
-		"variation": sKey,
-	}).Debug("Got a cached response for the key")
+		"id": rep.ID,
+	}).Info("Get a representation")
 
-	return cached.clone()
+	return rep.clone()
+}
+
+// Purge removes any representations associated to the request.
+func (s *Store) Purge(req *http.Request) {
+	s.init()
+
+	s.RLock()
+	defer s.RUnlock()
+
+	resKey := NewResourceKey(req)
+	res, ok := s.Resources[resKey]
+	if !ok {
+		return
+	}
+	delete(s.Resources, resKey)
+
+	for _, rep := range res.Representations {
+		s.History.Remove(rep.Element)
+
+		log.WithFields(log.Fields{
+			"id": rep.ID,
+		}).Info("Removed a representation")
+	}
 }
 
 func (s *Store) init() {
 	s.Lock()
 	defer s.Unlock()
 
-	if s.Resource == nil {
-		s.Resource = make(map[ResourceKey]*Resource)
+	if s.Resources == nil {
+		s.Resources = make(map[ResourceKey]*Resource)
 	}
 
 	if s.History == nil {
@@ -205,19 +176,17 @@ func (s *Store) init() {
 
 // ResourceKey identifies resources with the same URL.
 type ResourceKey struct {
-	Method string
-	Host   string
-	Path   string
-	Query  string
+	Host  string `json:"host"`
+	Path  string `json:"path"`
+	Query string `json:"query"`
 }
 
 // NewResourceKey returns a resource key of the request.
 func NewResourceKey(req *http.Request) ResourceKey {
 	return ResourceKey{
-		Method: req.Method,
-		Host:   req.URL.Host,
-		Path:   req.URL.Path,
-		Query:  req.URL.Query().Encode(),
+		Host:  req.URL.Host,
+		Path:  req.URL.Path,
+		Query: req.URL.Query().Encode(),
 	}
 }
 
@@ -240,14 +209,19 @@ func NewResource(rep *Representation) *Resource {
 		}
 	}
 
-	return &Resource{
+	res := &Resource{
 		Fields:          fields,
 		Representations: make(map[RepresentationKey]*Representation),
 	}
+
+	return res
 }
 
 // RepresentationKey identifies a cached response in variations.
-type RepresentationKey string
+type RepresentationKey struct {
+	Method string
+	Key    string
+}
 
 // NewRepresentationKey constructs a new variation key from a request.
 func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
@@ -255,7 +229,7 @@ func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 	for _, fields := range res.Fields {
 		fields := strings.Split(fields, ",")
 		for _, field := range fields {
-			keys = append(keys, strings.Trim(field, " "))
+			keys = append(keys, strings.TrimSpace(field))
 		}
 	}
 
@@ -265,7 +239,7 @@ func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 		for _, vals := range req.Header[key] {
 			vals := strings.Split(vals, ",")
 			for _, val := range vals {
-				values = append(values, strings.Trim(val, " "))
+				values = append(values, strings.TrimSpace(val))
 			}
 		}
 
@@ -275,7 +249,10 @@ func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 		}
 	}
 
-	return RepresentationKey(vals.Encode())
+	return RepresentationKey{
+		Method: req.Method,
+		Key:    vals.Encode(),
+	}
 }
 
 type key struct {

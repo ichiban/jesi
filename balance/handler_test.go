@@ -1,32 +1,50 @@
 package balance
 
 import (
-	"bytes"
-	"container/list"
+	"crypto/tls"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/ichiban/jesi/cache"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
-		backends []*Backend
-		reqURL   url.URL
-		numReqs  int
+		node       *Node
+		backends   []*Backend
+		givenReqs  []*http.Request
+		givenResps []*http.Response
 
-		directed []url.URL
+		expectedReqs  []*http.Request
+		expectedResps []*http.Response
 	}{
-		{ // if there's no backend available, it doesn't anything.
+		{ // if there's no backend available, it returns 502 Bad Gateway.
 			backends: []*Backend{},
-			reqURL:   url.URL{Path: "/foo"},
-			numReqs:  1,
+			givenReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+				},
+			},
+			givenResps: []*http.Response{
+				nil,
+			},
 
-			directed: []url.URL{
-				{Path: "/foo"},
+			expectedReqs: []*http.Request{
+				nil,
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusBadGateway,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("")),
+				},
 			},
 		},
 		{ // if there're multiple backends available, it spreads the workload across them.
@@ -35,27 +53,313 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				{URL: &url.URL{Scheme: "https", Host: "b.example.com"}},
 				{URL: &url.URL{Scheme: "https", Host: "c.example.com"}},
 			},
-			reqURL:  url.URL{Path: "/foo"},
-			numReqs: 6,
+			givenReqs: []*http.Request{
+				{Method: http.MethodGet, URL: &url.URL{Path: "/foo"}},
+				{Method: http.MethodGet, URL: &url.URL{Path: "/foo"}},
+				{Method: http.MethodGet, URL: &url.URL{Path: "/foo"}},
+				{Method: http.MethodGet, URL: &url.URL{Path: "/foo"}},
+				{Method: http.MethodGet, URL: &url.URL{Path: "/foo"}},
+				{Method: http.MethodGet, URL: &url.URL{Path: "/foo"}},
+			},
+			givenResps: []*http.Response{
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+			},
 
-			directed: []url.URL{
-				{Scheme: "https", Host: "a.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "b.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "c.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "a.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "b.example.com", Path: "/foo"},
-				{Scheme: "https", Host: "c.example.com", Path: "/foo"},
+			expectedReqs: []*http.Request{
+				{Method: http.MethodGet, URL: &url.URL{Scheme: "https", Host: "a.example.com", Path: "/foo"}, Header: http.Header{"X-Forwarded-Proto": []string{"http"}, "Forwarded": []string{`proto=http`}}},
+				{Method: http.MethodGet, URL: &url.URL{Scheme: "https", Host: "b.example.com", Path: "/foo"}, Header: http.Header{"X-Forwarded-Proto": []string{"http"}, "Forwarded": []string{`proto=http`}}},
+				{Method: http.MethodGet, URL: &url.URL{Scheme: "https", Host: "c.example.com", Path: "/foo"}, Header: http.Header{"X-Forwarded-Proto": []string{"http"}, "Forwarded": []string{`proto=http`}}},
+				{Method: http.MethodGet, URL: &url.URL{Scheme: "https", Host: "a.example.com", Path: "/foo"}, Header: http.Header{"X-Forwarded-Proto": []string{"http"}, "Forwarded": []string{`proto=http`}}},
+				{Method: http.MethodGet, URL: &url.URL{Scheme: "https", Host: "b.example.com", Path: "/foo"}, Header: http.Header{"X-Forwarded-Proto": []string{"http"}, "Forwarded": []string{`proto=http`}}},
+				{Method: http.MethodGet, URL: &url.URL{Scheme: "https", Host: "c.example.com", Path: "/foo"}, Header: http.Header{"X-Forwarded-Proto": []string{"http"}, "Forwarded": []string{`proto=http`}}},
+			},
+			expectedResps: []*http.Response{
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
+				{StatusCode: http.StatusOK, Body: ioutil.NopCloser(strings.NewReader("foo"))},
 			},
 		},
-		{ // if there're query strings in the backend URL or the request URL, it combines them.
+		{ // with hop-by-hop headers
 			backends: []*Backend{
-				{URL: &url.URL{Scheme: "https", Host: "a.example.com", RawQuery: "a=0&b=1"}},
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
 			},
-			reqURL:  url.URL{Path: "/foo", RawQuery: "c=2&d=3"},
-			numReqs: 1,
-
-			directed: []url.URL{
-				{Scheme: "https", Host: "a.example.com", Path: "/foo", RawQuery: "a=0&b=1&c=2&d=3"},
+			givenReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"Connection": []string{"foo, bar"},
+						"Foo":        []string{"abc"},
+						"Bar":        []string{"def"},
+						"Baz":        []string{"ghq"},
+					},
+				},
+			},
+			givenResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header: http.Header{
+						"Connection": []string{"hoge, foo"},
+						"Hoge":       []string{"abc"},
+						"Fuga":       []string{"def"},
+						"Foo":        []string{"ghq"},
+					},
+					Body: ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+			expectedReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"Baz":               []string{"ghq"},
+						"X-Forwarded-Proto": []string{"http"},
+						"Forwarded":         []string{`proto=http`},
+					},
+				},
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header: http.Header{
+						"Fuga": []string{"def"},
+					},
+					Body: ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+		},
+		{ // with Node, RemoteAddr, Host, and TLS
+			node: &Node{
+				ID: "_d3d2e741-5d38-4356-8df4-b1d019bd634e",
+			},
+			backends: []*Backend{
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
+			},
+			givenReqs: []*http.Request{
+				{
+					RemoteAddr: "192.0.2.1:12345",
+					Host:       "example.com",
+					Method:     http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{},
+					TLS:    &tls.ConnectionState{},
+				},
+			},
+			givenResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+			expectedReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-For":   []string{"192.0.2.1"},
+						"X-Forwarded-Host":  []string{"example.com"},
+						"X-Forwarded-Proto": []string{"https"},
+						"Forwarded":         []string{`by=_d3d2e741-5d38-4356-8df4-b1d019bd634e;for="192.0.2.1:12345";host=example.com;proto=https`},
+					},
+				},
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+		},
+		{ // with RemoteAddr, X-Forwarded-For, and Forwarded
+			backends: []*Backend{
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
+			},
+			givenReqs: []*http.Request{
+				{
+					RemoteAddr: "192.0.2.3:12345",
+					Method:     http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-For":   []string{"192.0.2.1, 192.0.2.2"},
+						"X-Forwarded-Proto": []string{"http"},
+						"Forwarded":         []string{`for="192.0.2.1:12345"`, `for="192.0.2.2:12345"`},
+					},
+				},
+			},
+			givenResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+			expectedReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-For":   []string{"192.0.2.1, 192.0.2.2, 192.0.2.3"},
+						"X-Forwarded-Proto": []string{"http"},
+						"Forwarded":         []string{`for="192.0.2.1:12345"`, `for="192.0.2.2:12345"`, `for="192.0.2.3:12345";proto=http`},
+					},
+				},
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+		},
+		{ // with RemoteAddr, X-Forwarded-For (X-Forwarded-For will be converted to Forwarded)
+			backends: []*Backend{
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
+			},
+			givenReqs: []*http.Request{
+				{
+					RemoteAddr: "192.0.2.3:12345",
+					Method:     http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-For": []string{"192.0.2.1, 192.0.2.2"},
+					},
+				},
+			},
+			givenResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+			expectedReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-For":   []string{"192.0.2.1, 192.0.2.2, 192.0.2.3"},
+						"X-Forwarded-Proto": []string{"http"},
+						"Forwarded":         []string{`for=192.0.2.1`, `for=192.0.2.2`, `for="192.0.2.3:12345";proto=http`},
+					},
+				},
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+		},
+		{ // with RemoteAddr, X-Forwarded-For, and X-Forwarded-By
+			backends: []*Backend{
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
+			},
+			givenReqs: []*http.Request{
+				{
+					RemoteAddr: "192.0.2.3:12345",
+					Method:     http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-By":  []string{"192.0.2.10"},
+						"X-Forwarded-For": []string{"192.0.2.1, 192.0.2.2"},
+					},
+				},
+			},
+			givenResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+			expectedReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-By":    []string{"192.0.2.10"},
+						"X-Forwarded-For":   []string{"192.0.2.1, 192.0.2.2, 192.0.2.3"},
+						"X-Forwarded-Proto": []string{"http"},
+						"Forwarded":         []string{`for=192.0.2.1`, `for=192.0.2.2`, `for="192.0.2.3:12345";proto=http`},
+					},
+				},
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("foo")),
+				},
+			},
+		},
+		{ // with error
+			backends: []*Backend{
+				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
+			},
+			givenReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{},
+				},
+			},
+			givenResps: []*http.Response{
+				{
+					Body: ioutil.NopCloser(strings.NewReader("")),
+				},
+			},
+			expectedReqs: []*http.Request{
+				{
+					Method: http.MethodGet,
+					URL: &url.URL{
+						Path: "/foo",
+					},
+					Header: http.Header{
+						"X-Forwarded-Proto": []string{"http"},
+						"Forwarded":         []string{`proto=http`},
+					},
+				},
+			},
+			expectedResps: []*http.Response{
+				{
+					StatusCode: http.StatusBadGateway,
+					Header:     http.Header{},
+					Body:       ioutil.NopCloser(strings.NewReader("")),
+				},
 			},
 		},
 	}
@@ -67,448 +371,84 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			p.Add(b)
 		}
 
-		h := Handler{BackendPool: &p}
+		for n := range tc.givenReqs {
+			h := &testHandler{
+				resp: tc.givenResps[n],
+			}
 
-		rt := testRoundTripper{}
+			handler := &Handler{
+				Node:        tc.node,
+				BackendPool: &p,
+				Next:        h,
+			}
 
-		h.ReverseProxy.Transport = &rt
-
-		for i := 0; i < tc.numReqs; i++ {
 			var rep cache.Representation
-			h.ServeHTTP(&rep, &http.Request{
-				URL:    &tc.reqURL,
-				Header: http.Header{},
-			})
-		}
+			handler.ServeHTTP(&rep, tc.givenReqs[n])
 
-		if len(tc.directed) != len(rt.urls) {
-			t.Errorf("(%d) expect: %d, got: %d", i, len(tc.directed), len(rt.urls))
-			continue
-		}
-
-		for j, u := range tc.directed {
-			if u.String() != rt.urls[j].String() {
-				t.Errorf("(%d) expect: %s, got: %s", i, u, rt.urls[j])
-			}
-		}
-	}
-}
-
-func TestBackend_Probe(t *testing.T) {
-	testCases := []struct {
-		backend  Backend
-		statuses []int
-
-		sick bool
-	}{
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: false,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-
-			sick: false,
-		},
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: false,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-
-			sick: true,
-		},
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: true,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-
-			sick: true,
-		},
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: true,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-
-			sick: false,
-		},
-	}
-
-	for _, tc := range testCases {
-		tc.backend.Transport = &testRoundTripper{
-			statuses: tc.statuses,
-		}
-		tc.backend.Probe()
-		if tc.sick != tc.backend.Sick {
-			t.Errorf("expected: %t, got: %t", tc.sick, tc.backend.Sick)
-		}
-
-	}
-}
-
-func TestBackend_Run(t *testing.T) {
-	testCases := []struct {
-		backend  Backend
-		statuses []int
-	}{
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: false,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-			},
-		},
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: false,
-			},
-			statuses: []int{
-				http.StatusOK,
-				http.StatusInternalServerError,
-			},
-		},
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: true,
-			},
-			statuses: []int{
-				http.StatusOK,
-			},
-		},
-		{
-			backend: Backend{
-				URL:  &url.URL{Path: "/foo"},
-				Sick: true,
-			},
-			statuses: []int{
-				http.StatusInternalServerError,
-				http.StatusOK,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		transport := testRoundTripper{
-			statuses: tc.statuses,
-		}
-
-		timer := make(chan time.Time)
-		tc.backend.Timer = timer
-		tc.backend.Transport = &transport
-
-		old := tc.backend.Sick
-
-		ch := make(chan *Backend)
-		q := make(chan struct{})
-
-		go tc.backend.Run(ch, q)
-
-		for range tc.statuses {
-			timer <- time.Now()
-		}
-		b := <-ch
-		close(q)
-
-		if &tc.backend != b {
-			t.Errorf("expected: %#v, got: %#v", &tc.backend, b)
-		}
-
-		if old == b.Sick {
-			t.Errorf("expected: %t, got: %t", !old, b.Sick)
-		}
-	}
-}
-
-func TestBackendPool_Set(t *testing.T) {
-	testCases := []struct {
-		s int
-		q string
-	}{
-		{
-			s: http.StatusOK,
-			q: "healthy",
-		},
-		{
-			s: http.StatusInternalServerError,
-			q: "sick",
-		},
-	}
-
-	for _, tc := range testCases {
-		var p BackendPool
-		p.RoundTripper = &testRoundTripper{statuses: []int{tc.s}}
-		p.Set("http://example.com/foo")
-
-		var queue string
-		if p.Healthy.Len() > 0 {
-			queue = "healthy"
-		}
-		if p.Sick.Len() > 0 {
-			queue = "sick"
-		}
-
-		if tc.q != queue {
-			t.Errorf("expected %s, got %s", tc.q, queue)
-		}
-	}
-
-}
-
-func TestBackendPool_Add(t *testing.T) {
-	testCases := []struct {
-		b    Backend
-		sick bool
-	}{
-		{
-			b: Backend{
-				URL: &url.URL{Path: "/foo"},
-				Client: http.Client{
-					Transport: &testRoundTripper{statuses: []int{http.StatusOK}},
-				},
-			},
-			sick: false,
-		},
-		{
-			b: Backend{
-				URL: &url.URL{Path: "/foo"},
-				Client: http.Client{
-					Transport: &testRoundTripper{statuses: []int{http.StatusInternalServerError}},
-				},
-			},
-			sick: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		var p BackendPool
-		p.Add(&tc.b)
-
-		var l *list.List
-		if tc.sick {
-			l = &p.Sick
-		} else {
-			l = &p.Healthy
-		}
-
-		var found bool
-		for e := l.Front(); e != nil; e.Next() {
-			b := e.Value.(*Backend)
-			if b == &tc.b {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Error("expected found, got not found")
-		}
-	}
-
-}
-
-func TestBackendPool_Next(t *testing.T) {
-	a := &Backend{}
-	b := &Backend{}
-	c := &Backend{}
-
-	testCases := []struct {
-		before []*Backend
-		next   *Backend
-		after  []*Backend
-	}{
-		{
-			before: []*Backend{},
-			next:   nil,
-			after:  []*Backend{},
-		},
-		{
-			before: []*Backend{a},
-			next:   a,
-			after:  []*Backend{a},
-		},
-		{
-			before: []*Backend{a, b, c},
-			next:   a,
-			after:  []*Backend{b, c, a},
-		},
-	}
-
-	for i, tc := range testCases {
-		var p BackendPool
-
-		for _, b := range tc.before {
-			b.Element = p.Healthy.PushBack(b)
-		}
-
-		n := p.Next()
-
-		if tc.next != n {
-			t.Errorf("(%d) expected: %#v, got: %#v", i, tc.next, n)
-		}
-
-		var result []*Backend
-		for e := p.Healthy.Front(); e != nil; e = e.Next() {
-			result = append(result, e.Value.(*Backend))
-		}
-
-		if len(tc.after) != len(result) {
-			t.Errorf("(%d) expected: %d, got: %d", i, len(tc.after), len(result))
-		}
-
-		for j, a := range tc.after {
-			if a != tc.after[j] {
-				t.Errorf("(%d, %d) expected: %#v, got: %#v", i, j, a, tc.after[j])
-			}
-		}
-	}
-}
-
-func TestBackendPool_Run(t *testing.T) {
-	a := &Backend{
-		URL: &url.URL{Path: "/foo"},
-		Client: http.Client{
-			Transport: &testRoundTripper{},
-		},
-		Interval: time.Hour,
-	}
-	b := &Backend{
-		URL: &url.URL{Path: "/foo"},
-		Client: http.Client{
-			Transport: &testRoundTripper{},
-		},
-		Interval: time.Hour,
-	}
-
-	testCases := []struct {
-		beforeHealthy []*Backend
-		beforeSick    []*Backend
-
-		change []*Backend
-
-		afterHealthy []*Backend
-		afterSick    []*Backend
-	}{
-		{
-			beforeHealthy: []*Backend{},
-			beforeSick:    []*Backend{},
-
-			change: []*Backend{},
-
-			afterHealthy: []*Backend{},
-			afterSick:    []*Backend{},
-		},
-		{
-			beforeHealthy: []*Backend{a},
-			beforeSick:    []*Backend{b},
-
-			change: []*Backend{a, b},
-
-			afterHealthy: []*Backend{b},
-			afterSick:    []*Backend{a},
-		},
-	}
-
-	for i, tc := range testCases {
-		var p BackendPool
-
-		for _, b := range tc.beforeHealthy {
-			b.Client = http.Client{Transport: &testRoundTripper{statuses: []int{http.StatusOK}}}
-			p.Add(b)
-		}
-
-		for _, b := range tc.beforeSick {
-			b.Client = http.Client{Transport: &testRoundTripper{statuses: []int{http.StatusInternalServerError}}}
-			p.Add(b)
-		}
-
-		ch := make(chan struct{})
-
-		go p.Run(ch)
-
-		<-ch
-
-		for _, b := range tc.change {
-			b.Sick = !b.Sick
-			p.Changed <- b
-			<-ch
-		}
-
-		close(ch)
-
-		{
-			var healthy []*Backend
-			for e := p.Healthy.Front(); e != nil; e = e.Next() {
-				b := e.Value.(*Backend)
-				healthy = append(healthy, b)
-			}
-
-			if len(tc.afterHealthy) != len(healthy) {
-				t.Errorf("(%d) expected: %d, got: %d", i, len(tc.afterHealthy), len(healthy))
-			}
-
-			for j, h := range tc.afterHealthy {
-				if h.URL.String() != healthy[j].URL.String() {
-					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, h.URL, healthy[j].URL)
+			// request
+			if h.req != nil {
+				if len(tc.expectedReqs[n].Header) != len(h.req.Header) {
+					t.Errorf("(%d) expected: %v, got: %v", i, tc.expectedReqs[n].Header, h.req.Header)
+				}
+				for k, vs := range h.req.Header {
+					if len(tc.expectedReqs[n].Header[k]) != len(vs) {
+						t.Errorf("(%d) [%s] expected: %d, got: %d", i, k, len(tc.expectedReqs[n].Header[k]), len(vs))
+						continue
+					}
+					for j, v := range vs {
+						if tc.expectedReqs[n].Header[k][j] != v {
+							t.Errorf("(%d) [%s] expected: %s, got: %s", i, k, tc.expectedReqs[n].Header[k][j], v)
+						}
+					}
 				}
 			}
-		}
-		{
-			var sick []*Backend
-			for e := p.Sick.Front(); e != nil; e = e.Next() {
-				b := e.Value.(*Backend)
-				sick = append(sick, b)
-			}
 
-			if len(tc.afterSick) != len(sick) {
-				t.Errorf("(%d) expected: %d, got: %d", i, len(tc.afterSick), len(sick))
+			// response
+			if len(tc.expectedResps[n].Header) != len(rep.HeaderMap) {
+				t.Errorf("(%d) expected: %d, got: %d", i, len(tc.expectedResps[n].Header), len(rep.HeaderMap))
 			}
-
-			for j, s := range tc.afterSick {
-				if s.URL.String() != sick[j].URL.String() {
-					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, s.URL, sick[j].URL)
+			for k, vs := range rep.HeaderMap {
+				if len(tc.expectedResps[n].Header[k]) != len(vs) {
+					t.Errorf("(%d) [%s] expected: %d, got: %d", i, k, len(tc.expectedResps[n].Header[k]), len(vs))
+					continue
+				}
+				for j, v := range vs {
+					if tc.expectedResps[n].Header[k][j] != v {
+						t.Errorf("(%d) [%s] expected: %s, got: %s", i, k, tc.expectedResps[n].Header[k][j], v)
+					}
 				}
 			}
+
+			if tc.expectedResps[n].Body == nil {
+				continue
+			}
+
+			tcb, err := ioutil.ReadAll(tc.expectedResps[n].Body)
+			if err != nil {
+				panic(err)
+			}
+
+			if string(tcb) != string(rep.Body) {
+				t.Errorf("(%d) expected: %s, got: %s", i, string(tcb), string(rep.Body))
+			}
 		}
 	}
 }
 
-type testRoundTripper struct {
-	statuses []int
-	urls     []url.URL
+type testHandler struct {
+	req  *http.Request
+	resp *http.Response
 }
 
-var _ http.RoundTripper = (*testRoundTripper)(nil)
+var _ http.Handler = (*testHandler)(nil)
 
-func (t *testRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.urls = append(t.urls, *req.URL)
-
-	var status int
-	if len(t.statuses) == 0 {
-		status = http.StatusOK
-	} else {
-		status = t.statuses[0]
-		t.statuses = t.statuses[1:]
+func (t *testHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	t.req = r
+	for k, vs := range t.resp.Header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
 	}
-
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{},
-		Body:       ioutil.NopCloser(bytes.NewBuffer(nil)),
-	}, nil
+	w.WriteHeader(t.resp.StatusCode)
+	io.Copy(w, t.resp.Body)
 }

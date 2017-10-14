@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/satori/go.uuid"
 )
 
 // Representation is a buffered response.
 type Representation struct {
 	sync.RWMutex
+	ID           uuid.UUID
 	StatusCode   int
 	HeaderMap    http.Header
 	Body         []byte
@@ -21,6 +24,16 @@ type Representation struct {
 
 var _ http.ResponseWriter = (*Representation)(nil)
 var _ io.WriterTo = (*Representation)(nil)
+
+// NewRepresentation creates a new representation from a handler and request.
+func NewRepresentation(h http.Handler, r *http.Request) *Representation {
+	var rep Representation
+	rep.ID = uuid.NewV4()
+	rep.RequestTime = time.Now()
+	h.ServeHTTP(&rep, r)
+	rep.ResponseTime = time.Now()
+	return &rep
+}
 
 // Header returns HTTP header.
 func (r *Representation) Header() http.Header {
@@ -42,7 +55,7 @@ func (r *Representation) WriteHeader(code int) {
 }
 
 // WriteTo writes out the contents of the buffer to io.Writer.
-// it also writes status code and header if w is an http.ResponseWriter.
+// it also writes status code and header if w is an http.responseWriter.
 func (r *Representation) WriteTo(w io.Writer) (int64, error) {
 	rw, ok := w.(http.ResponseWriter)
 	if !ok {

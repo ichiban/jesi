@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ichiban/jesi/request"
 	log "github.com/sirupsen/logrus"
-)
 
+	"github.com/ichiban/jesi/transaction"
+)
 
 var (
 	noStore                         = regexp.MustCompile(`\Ano-store\z`)
@@ -31,30 +31,21 @@ var (
 // Handler is a caching handler.
 type Handler struct {
 	Next http.Handler
-	Store
+	*Store
 }
 
 var _ http.Handler = (*Handler)(nil)
 
 // ServeHTTP returns a cached response if found. Otherwise, retrieves one from the underlying handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.WithFields(log.Fields{
-		"request": r.URL,
-	}).Debug("Will serve a cached response if exists")
-
 	cached := h.Get(r)
 	state, delta := h.State(r, cached)
-	log.WithFields(log.Fields{
-		"request": r.URL,
-		"state":   state,
-		"delta":   delta,
-	}).Info("Got a state of a request")
 
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
-		"state":   state,
-		"delta":   delta,
-	}).Info("Got a state of a cached response")
+		"id":    transaction.ID(r),
+		"state": state,
+		"delta": delta,
+	}).Debug("Got a state of a representation")
 
 	switch state {
 	case Fresh:
@@ -63,7 +54,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case Stale:
 		if max := maxStale(cached); max < delta {
 			log.WithFields(log.Fields{
-				"request":   request.ID(r),
+				"id":        transaction.ID(r),
 				"max-stale": max,
 				"delta":     delta,
 			}).Debug("Delta exceeded max-stale.")
@@ -82,60 +73,57 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	origURL := *r.URL
 	origReq.URL = &origURL
 
-	var rep Representation
-	rep.RequestTime = time.Now()
-	h.Next.ServeHTTP(&rep, r)
-	rep.ResponseTime = time.Now()
+	rep := NewRepresentation(h.Next, r)
 	defer func() {
 		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
-				"request": request.ID(r),
-				"error":   err,
+				"id":    transaction.ID(r),
+				"error": err,
 			}).Error("Couldn't write a response")
 		}
 	}()
 
 	if !rep.Successful() {
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
-			"status":  rep.StatusCode,
+			"id":     transaction.ID(r),
+			"status": rep.StatusCode,
 		}).Debug("Couldn't get a successful response")
 
 		if state == Stale {
 			log.WithFields(log.Fields{
-				"request": request.ID(r),
+				"id": transaction.ID(r),
 			}).Debug("Will serve a stale response")
 
-			rep = *staleResponse(cached)
+			rep = staleResponse(cached)
 		}
 		return
 	}
 
-	if originChanged(r, &rep) {
+	if originChanged(r, rep) {
 		h.OriginChangedAt = rep.ResponseTime
 
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
-			"at":      rep.ResponseTime,
-		}).Info("The origin changed")
+			"id": transaction.ID(r),
+			"at": rep.ResponseTime,
+		}).Debug("The origin changed")
 	}
 
-	if revalidated(state, &rep) {
+	if revalidated(state, rep) {
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
+			"id": transaction.ID(r),
 		}).Debug("Will serve a revalidated response")
 
-		rep = *revalidatedResponse(&rep, cached)
+		rep = revalidatedResponse(rep, cached)
 	}
 
-	h.cacheIfPossible(&origReq, &rep)
+	h.cacheIfPossible(&origReq, rep)
 }
 
 func serveFresh(w io.Writer, cached *Representation, r *http.Request) {
 	if _, err := cached.WriteTo(w); err != nil {
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
-			"error":   err,
+			"id":    transaction.ID(r),
+			"error": err,
 		}).Error("Couldn't write a response")
 	}
 }
@@ -144,8 +132,8 @@ func serveStale(w io.Writer, cached *Representation, r *http.Request) {
 	resp := staleResponse(cached)
 	if _, err := resp.WriteTo(w); err != nil {
 		log.WithFields(log.Fields{
-			"request": request.ID(r),
-			"error":   err,
+			"id":    transaction.ID(r),
+			"error": err,
 		}).Error("Couldn't write a response")
 	}
 }

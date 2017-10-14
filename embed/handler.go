@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/ichiban/jesi/cache"
-	"github.com/ichiban/jesi/request"
+	"github.com/ichiban/jesi/transaction"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -41,20 +41,14 @@ var _ http.Handler = (*Handler)(nil)
 // ServeHTTP fetches a response from the underlying handler and if it contains links matching the embedding spec,
 // also fetches linked documents and embeds them.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	r = request.WithID(r)
-	log.WithFields(log.Fields{
-		"request": request.ID(r),
-	}).Info("Started a request")
-
 	spec := stripSpec(r)
 
-	var rep cache.Representation
-	h.Next.ServeHTTP(&rep, r)
+	rep := cache.NewRepresentation(h.Next, r)
 	defer func() {
 		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
-				"request": request.ID(r),
-				"error":   err,
+				"id":    transaction.ID(r),
+				"error": err,
 			}).Error("Couldn't write a response")
 		}
 	}()
@@ -69,7 +63,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	doc := &document{
-		CacheControl: NewCacheControl(&rep),
+		CacheControl: NewCacheControl(rep),
 		data:         data,
 	}
 	h.embed(r, doc, spec)
@@ -93,8 +87,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(r),
-	}).Info("Finished a request")
+		"id": transaction.ID(r),
+	}).Debug("Finished a request")
 }
 
 type specifier map[string]specifier
@@ -129,7 +123,7 @@ type document struct {
 	data interface{}
 }
 
-func (h *Handler) embed(req *http.Request, doc *document, spec specifier) {
+func (h *Handler) embed(base *http.Request, doc *document, spec specifier) {
 	if len(spec) == 0 {
 		return
 	}
@@ -156,14 +150,14 @@ func (h *Handler) embed(req *http.Request, doc *document, spec specifier) {
 		switch l := l.(type) {
 		case map[string]interface{}:
 			count++
-			go h.fetch(req, edge, nil, l[href].(string), next, ch)
+			go h.fetch(base, edge, nil, l[href].(string), next, ch)
 		case []interface{}:
 			es[edge] = make([]interface{}, len(l))
 			for i, l := range l {
 				i := i
 				l := l.(map[string]interface{})
 				count++
-				go h.fetch(req, edge, &i, l[href].(string), next, ch)
+				go h.fetch(base, edge, &i, l[href].(string), next, ch)
 			}
 		}
 	}
@@ -187,11 +181,11 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(base),
-		"edge":    edge,
-		"pos":     pos,
-		"href":    uri,
-		"next":    next,
+		"id":   transaction.ID(base),
+		"edge": edge,
+		"pos":  pos,
+		"href": uri,
+		"next": next,
 	}).Debug("Will fetch a subdocument")
 
 	req, err := http.NewRequest(http.MethodGet, uri.String(), nil)
@@ -199,18 +193,16 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 		ch <- errorDocument(edge, pos, NewMalformedSubRequestError(err, uri))
 		return
 	}
-	req.Header = base.Header
-	req = request.WithID(req)
-	log.WithFields(log.Fields{
-		"request": request.ID(req),
-		"parent":  request.ID(base),
-	}).Info("Started a subrequest")
+	req = req.WithContext(base.Context())
+	for k, vs := range base.Header {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
+	}
 
-	var rep cache.Representation
-	h.Next.ServeHTTP(&rep, req)
-
+	rep := cache.NewRepresentation(h.Next, req)
 	if !rep.Successful() {
-		ch <- errorDocument(edge, pos, NewResponseError(&rep, uri))
+		ch <- errorDocument(edge, pos, NewResponseError(rep, uri))
 		return
 	}
 
@@ -221,10 +213,10 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 	}
 
 	doc := &document{
-		CacheControl: NewCacheControl(&rep),
+		CacheControl: NewCacheControl(rep),
 		data:         data,
 	}
-	h.embed(req, doc, next)
+	h.embed(base, doc, next)
 
 	ch <- &document{
 		CacheControl: doc.CacheControl,
@@ -234,9 +226,9 @@ func (h *Handler) fetch(base *http.Request, edge string, pos *int, href string, 
 	}
 
 	log.WithFields(log.Fields{
-		"request": request.ID(req),
-		"parent":  request.ID(base),
-	}).Info("Finished a subrequest")
+		"child":  transaction.ID(req),
+		"parent": transaction.ID(base),
+	}).Debug("Finished a subrequest")
 }
 
 func errorDocument(edge string, pos *int, e *Error) *document {

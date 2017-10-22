@@ -62,12 +62,12 @@ func (s *Store) Set(req *http.Request, rep *Representation) {
 }
 
 func (s *Store) evict() {
-	var minResKey *ResourceKey
-	var minRepKey *RepresentationKey
+	var minResKey ResourceKey
+	var minRepKey RepresentationKey
 	var minRep *Representation
-	var i uint
+	i := s.Sample
 	for resKey, res := range s.Resources {
-		if i >= s.Sample {
+		if i == 0 {
 			break
 		}
 
@@ -78,33 +78,28 @@ func (s *Store) evict() {
 			break
 		}
 
-		if minResKey != nil && minRepKey != nil && Less(minRep, rep) {
+		if minRep != nil && less(minRep, rep) {
 			continue
 		}
 
-		resKey := resKey
-		minResKey = &resKey
-		minRepKey = &repKey
+		minResKey = resKey
+		minRepKey = repKey
 		minRep = rep
 
-		i++
+		i--
 	}
 
-	if minResKey == nil || minRepKey == nil {
-		return
-	}
-
-	res, ok := s.Resources[*minResKey]
+	res, ok := s.Resources[minResKey]
 	if !ok {
 		return
 	}
 	defer func() {
 		if len(res.Representations) == 0 {
-			delete(s.Resources, *minResKey)
+			delete(s.Resources, minResKey)
 		}
 	}()
 
-	delete(res.Representations, *minRepKey)
+	delete(res.Representations, minRepKey)
 	s.InUse -= uint64(len(minRep.Body))
 
 	log.WithFields(log.Fields{
@@ -131,7 +126,9 @@ func (s *Store) Get(req *http.Request) *Representation {
 		return nil
 	}
 
+	rep.Lock()
 	rep.LastUsedTime = time.Now()
+	rep.Unlock()
 
 	log.WithFields(log.Fields{
 		"id": rep.ID,
@@ -334,6 +331,6 @@ func (s CachedState) String() string {
 	}
 }
 
-func Less(a, b *Representation) bool {
+func less(a, b *Representation) bool {
 	return a.LastUsedTime.Before(b.LastUsedTime)
 }

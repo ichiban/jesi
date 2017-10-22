@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"container/list"
 	"io"
 	"net/http"
 	"sync"
@@ -19,7 +18,7 @@ type Representation struct {
 	Body         []byte
 	RequestTime  time.Time
 	ResponseTime time.Time
-	Element      *list.Element
+	LastUsedTime time.Time
 }
 
 var _ http.ResponseWriter = (*Representation)(nil)

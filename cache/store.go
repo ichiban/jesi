@@ -1,10 +1,8 @@
 package cache
 
 import (
-	"container/list"
 	"net/http"
 	"net/url"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -19,8 +17,9 @@ import (
 type Store struct {
 	sync.RWMutex
 	Resources       map[ResourceKey]*Resource
-	History         *list.List
-	Max             int
+	Max             uint64
+	InUse           uint64
+	Sample          uint
 	OriginChangedAt time.Time
 }
 
@@ -39,9 +38,7 @@ func (s *Store) Set(req *http.Request, rep *Representation) {
 	}
 
 	repKey := NewRepresentationKey(res, req)
-	if old, ok := res.Representations[repKey]; ok && old.Element != nil {
-		s.History.Remove(old.Element)
-
+	if old, ok := res.Representations[repKey]; ok {
 		log.WithFields(log.Fields{
 			"id": old.ID,
 		}).Info("Removed a representation")
@@ -53,59 +50,66 @@ func (s *Store) Set(req *http.Request, rep *Representation) {
 		"transaction": transaction.ID(req),
 	}).Info("Added a representation")
 
-	rep.Element = s.History.PushFront(key{resource: resKey, representation: repKey})
+	s.InUse += uint64(len(rep.Body))
 
 	if s.Max == 0 {
 		return
 	}
 
-	maxInBytes := uint64(s.Max) * 1024 * 1024 // MB
-
-	var stats runtime.MemStats
-	for i := 0; i < s.History.Len(); i++ {
-		runtime.ReadMemStats(&stats)
-
-		log.WithFields(log.Fields{
-			"inuse": stats.HeapInuse,
-			"max":   s.Max,
-		}).Debug("Read memory stats")
-
-		if stats.HeapInuse < maxInBytes {
-			break
-		}
-
-		s.evictLRU()
+	for s.InUse > s.Max {
+		s.evict()
 	}
 }
 
-func (s *Store) evictLRU() {
-	e := s.History.Back()
-	if e == nil {
-		log.Warn("Couldn't find a cached response to free")
+func (s *Store) evict() {
+	var minResKey *ResourceKey
+	var minRepKey *RepresentationKey
+	var minRep *Representation
+	var i uint
+	for resKey, res := range s.Resources {
+		if i >= s.Sample {
+			break
+		}
+
+		// the 1st representation in the resource
+		var repKey RepresentationKey
+		var rep *Representation
+		for repKey, rep = range res.Representations {
+			break
+		}
+
+		if minResKey != nil && minRepKey != nil && Less(minRep, rep) {
+			continue
+		}
+
+		resKey := resKey
+		minResKey = &resKey
+		minRepKey = &repKey
+		minRep = rep
+
+		i++
+	}
+
+	if minResKey == nil || minRepKey == nil {
 		return
 	}
-	s.History.Remove(e)
-	k, ok := e.Value.(key)
-	if !ok {
-		log.Fatalf("failed to coerce a history element to key: %#v", e.Value)
-	}
 
-	res, ok := s.Resources[k.resource]
+	res, ok := s.Resources[*minResKey]
 	if !ok {
 		return
 	}
+	defer func() {
+		if len(res.Representations) == 0 {
+			delete(s.Resources, *minResKey)
+		}
+	}()
 
-	if rep, ok := res.Representations[k.representation]; ok {
-		delete(res.Representations, k.representation)
+	delete(res.Representations, *minRepKey)
+	s.InUse -= uint64(len(minRep.Body))
 
-		log.WithFields(log.Fields{
-			"id": rep.ID,
-		}).Info("Removed a representation")
-	}
-
-	if len(res.Representations) == 0 {
-		delete(s.Resources, k.resource)
-	}
+	log.WithFields(log.Fields{
+		"id": minRep.ID,
+	}).Info("Removed a representation")
 }
 
 // Get retrieves a cached response.
@@ -127,9 +131,7 @@ func (s *Store) Get(req *http.Request) *Representation {
 		return nil
 	}
 
-	if rep.Element != nil {
-		s.History.MoveToFront(rep.Element)
-	}
+	rep.LastUsedTime = time.Now()
 
 	log.WithFields(log.Fields{
 		"id": rep.ID,
@@ -153,11 +155,11 @@ func (s *Store) Purge(req *http.Request) {
 	delete(s.Resources, resKey)
 
 	for _, rep := range res.Representations {
-		s.History.Remove(rep.Element)
-
 		log.WithFields(log.Fields{
 			"id": rep.ID,
 		}).Info("Removed a representation")
+
+		s.InUse -= uint64(len(rep.Body))
 	}
 }
 
@@ -167,10 +169,6 @@ func (s *Store) init() {
 
 	if s.Resources == nil {
 		s.Resources = make(map[ResourceKey]*Resource)
-	}
-
-	if s.History == nil {
-		s.History = list.New()
 	}
 }
 
@@ -256,8 +254,8 @@ func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 }
 
 type key struct {
-	resource       ResourceKey
-	representation RepresentationKey
+	resource       *ResourceKey
+	representation *RepresentationKey
 }
 
 // CachedState represents freshness of a cached response.
@@ -334,4 +332,8 @@ func (s CachedState) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+func Less(a, b *Representation) bool {
+	return a.LastUsedTime.Before(b.LastUsedTime)
 }

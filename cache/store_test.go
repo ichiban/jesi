@@ -5,7 +5,13 @@ import (
 	"net/url"
 	"testing"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
+
+func init() {
+	log.SetLevel(log.WarnLevel)
+}
 
 func TestStore_Get(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
@@ -464,5 +470,102 @@ func TestStore_Purge(t *testing.T) {
 			}
 
 		}
+	}
+}
+
+func BenchmarkStore_Get(b *testing.B) {
+	store := Store{
+		Resources: map[ResourceKey]*Resource{
+			{Host: "www.example.com", Path: "/test"}: {
+				RepresentationKeys: map[RepresentationKey]struct{}{
+					{Method: http.MethodGet, Key: ""}: {},
+				},
+			},
+		},
+		Representations: map[Key]*Representation{
+			{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+				Body: []byte(`{
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
+}`),
+			},
+		},
+	}
+
+	req := http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Host: "www.example.com",
+			Path: "/test",
+		},
+	}
+
+	for i := 0; i < b.N; i++ {
+		store.Get(&req)
+	}
+}
+
+func BenchmarkStore_Set(b *testing.B) {
+	store := Store{
+		Max:    1 * 1024 * 1024,
+		Sample: 3,
+	}
+
+	req := http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Host: "www.example.com",
+			Path: "/test",
+		},
+	}
+
+	resp := Representation{
+		Body: []byte(`{
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
+}`),
+	}
+
+	for i := 0; i < b.N; i++ {
+		store.Set(&req, &resp)
+	}
+}
+
+func BenchmarkStore_Purge(b *testing.B) {
+	store := Store{
+		Max:    1 * 1024 * 1024,
+		Sample: 3,
+	}
+
+	req := http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Host: "www.example.com",
+			Path: "/test",
+		},
+	}
+
+	resp := Representation{
+		Body: []byte(`{
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
+}`),
+	}
+
+	for i := 0; i < b.N; i++ {
+		store.Set(&req, &resp)
+		store.Purge(&req)
 	}
 }

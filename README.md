@@ -1,6 +1,6 @@
 # Jesi - a hypermedia API accelerator
 
-Jesi (stands for JSON Edge Side Include) is an HTTP reverse proxy that accelerates your web API by embedding & caching JSON responses.
+Jesi (stands for JSON Edge Side Include) is an HTTP reverse proxy that accelerates your web API by embedding & caching JSON representations.
 
 ## Getting Started
 
@@ -29,11 +29,12 @@ This will decrease the number of round trips over the Internet which is crucial 
 ### Caching
 
 Jesi implements HTTP Caching described in [RFC 7234](https://tools.ietf.org/html/rfc7234).
-Every response including but not limited to HAL+JSON documents is cached and served from the cache on behalf of the upstream server while it's fresh.
+Every representation including but not limited to HAL+JSON documents is cached and served from the cache on behalf of the upstream server while it's fresh.
 
-Combined with embedding, the resulting HAL+JSON response is constructed from cached responses and responses newly fetched from the upstream server so that it can maximize cache effectiveness.
+Combined with embedding, the resulting HAL+JSON representation is constructed from cached representations and representations newly fetched from the upstream server so that it can maximize cache effectiveness.
 
-When Jesi cache reaches the memory limitation specified by `-max` command line option, it evicts some cached responses with LRU algorithm.
+When Jesi cache reaches the memory limitation specified by `-max` command line option, it evicts some cached representations with LRU algorithm.
+Also, Jesi supports a de facto standard HTTP method `PURGE` to delete cached representations of a resource.
 
 ## Example
 
@@ -41,54 +42,54 @@ Let's consider an example of a movie database app. It has resources of a movie P
 
 ```json
 {
-  "title": "Pulp Fiction",
-  "year": 1994,
   "_links": {
     "self": {"href": "/movies/1"},
     "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
-  }
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
 }
 ```
 
 ```json
 {
-  "name": "Vincent Vega",
   "_links": {
     "self": {"href": "/roles/1"},
     "actor": {"href": "/actors/1"},
     "movie": {"href": "/movies/1"}
-  }
+  },
+  "name": "Vincent Vega"
 }
 ```
 
 ```json
 {
-  "name": "Jules Winnfield",
   "_links": {
     "self": {"href": "/roles/2"},
     "actor": {"href": "/actors/2"},
     "movie": {"href": "/movies/1"}
-  }
+  },
+  "name": "Jules Winnfield"
 }
 ```
 
 ```json
 {
-  "name": "John Travolta",
   "_links": {
     "self": {"href": "/actors/1"},
     "roles": [{"href": "/roles/1"}]
-  }
+  },
+  "name": "John Travolta"
 }
 ```
 
 ```json
 {
-  "name": "Samuel L. Jackson",
   "_links": {
     "self": {"href": "/actors/2"},
     "roles": [{"href": "/roles/2"}]
-  }
+  },
+  "name": "Samuel L. Jackson"
 }
 ```
 
@@ -101,8 +102,6 @@ By making a request `/movies/1?with=roles.actor`, Jesi responds with one big HAL
 
 ```json
 {
-  "title": "Pulp Fiction",
-  "year": 1994,
   "_links": {
     "self": {"href": "/movies/1"},
     "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
@@ -144,6 +143,8 @@ By making a request `/movies/1?with=roles.actor`, Jesi responds with one big HAL
         }
       }
     ]
-  }
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
 }
 ```

@@ -1,11 +1,17 @@
 package cache
 
 import (
-	"container/list"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
+
+	log "github.com/sirupsen/logrus"
 )
+
+func init() {
+	log.SetLevel(log.WarnLevel)
+}
 
 func TestStore_Get(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
@@ -31,12 +37,15 @@ func TestStore_Get(t *testing.T) {
 		{ // when it's cached
 			store: &Store{
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/test"}: {
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: ""}: {
-								Body: []byte(`{"foo":"bar"}`),
-							},
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
 						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -53,13 +62,16 @@ func TestStore_Get(t *testing.T) {
 		{ // when it's cached and also the representation key matches
 			store: &Store{
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/test"}: {
+					{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {
-								Body: []byte(`{"foo":"bar"}`),
-							},
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {},
 						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}}: {
+						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -80,13 +92,16 @@ func TestStore_Get(t *testing.T) {
 		{ // when it's cached but the representation key doesn't match
 			store: &Store{
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/test"}: {
+					{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {
-								Body: []byte(`{"foo":"bar"}`),
-							},
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {},
 						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}}: {
+						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -104,12 +119,15 @@ func TestStore_Get(t *testing.T) {
 		{ // when it's cached but the method doesn't match
 			store: &Store{
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/test"}: {
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: ""}: {
-								Body: []byte(`{"foo":"bar"}`),
-							},
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
 						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -163,33 +181,51 @@ func TestStore_Set(t *testing.T) {
 	}
 
 	testCases := []struct {
-		store *Store
-		req   *http.Request
-		rep   *Representation
+		before *Store
+		req    *http.Request
+		rep    *Representation
 
-		primary   ResourceKey
-		secondary RepresentationKey
+		after *Store
 	}{
 		{ // when there's no entry for the request (insert)
-			store: &Store{},
+			before: &Store{},
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
 			},
 			rep: &Representation{
-				Body: []byte{},
+				Body: []byte(`{"foo":"bar"}`),
 			},
 
-			primary:   ResourceKey{Host: "www.example.com", Path: "/test"},
-			secondary: RepresentationKey{Method: http.MethodGet, Key: ""},
+			after: &Store{
+				InUse: 13,
+				Resources: map[ResourceKey]*Resource{
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							RepresentationKey{Method: http.MethodGet, Key: ""}: {},
+						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"foo":"bar"}`),
+					},
+				},
+			},
 		},
 		{ // when there's an existing entry for the request (replace)
-			store: &Store{
+			before: &Store{
+				InUse: 13,
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/test"}: {
-						Representations: map[RepresentationKey]*Representation{
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
 							{Method: http.MethodGet, Key: ""}: {},
 						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"test":"ok"}`),
 					},
 				},
 			},
@@ -201,11 +237,24 @@ func TestStore_Set(t *testing.T) {
 				Body: []byte{},
 			},
 
-			primary:   ResourceKey{Host: "www.example.com", Path: "/test"},
-			secondary: RepresentationKey{Method: http.MethodGet, Key: ""},
+			after: &Store{
+				InUse: 0,
+				Resources: map[ResourceKey]*Resource{
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
+						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(``),
+					},
+				},
+			},
 		},
 		{ // when there's Vary header field
-			store: &Store{},
+			before: &Store{},
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -221,94 +270,109 @@ func TestStore_Set(t *testing.T) {
 				},
 			},
 
-			primary:   ResourceKey{Host: "www.example.com", Path: "/test"},
-			secondary: RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"},
+			after: &Store{
+				InUse: 0,
+				Resources: map[ResourceKey]*Resource{
+					{Host: "www.example.com", Path: "/test"}: {
+						Fields: []string{"Accept", "Accept-Language"},
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {},
+						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}}: {
+						Body: []byte{},
+						HeaderMap: http.Header{
+							"Vary": []string{"Accept", "Accept-Language"},
+						},
+					},
+				},
+			},
+		},
+		{ // when it exceeds the limit
+			before: &Store{
+				Max:    13,
+				InUse:  12,
+				Sample: 2,
+				Resources: map[ResourceKey]*Resource{
+					{Host: "www.example.com", Path: "/foo"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
+						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/foo"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body:         []byte(`{"foo":"ok"}`),
+						LastUsedTime: time.Now().Add(-10 * time.Minute),
+					},
+				},
+			},
+			req: &http.Request{
+				Method: http.MethodGet,
+				URL:    url,
+			},
+			rep: &Representation{
+				Body: []byte(`{"test":"ok"}`),
+			},
+
+			after: &Store{
+				InUse: 13,
+				Resources: map[ResourceKey]*Resource{
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
+						},
+					},
+				},
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"test":"ok"}`),
+					},
+				},
+			},
 		},
 	}
 
-	for _, tc := range testCases {
-		tc.store.Set(tc.req, tc.rep)
+	for i, tc := range testCases {
+		store := tc.before
+		store.Set(tc.req, tc.rep)
 
-		pe, ok := tc.store.Resources[tc.primary]
-		if !ok {
-			t.Errorf("expected store to have an entry for %#v but not", tc.primary)
+		if tc.after.InUse != store.InUse {
+			t.Errorf("(%d) [InUse] expected: %d, got: %d", i, tc.after.InUse, store.InUse)
 		}
 
-		rep, ok := pe.Representations[tc.secondary]
-		if !ok {
-			t.Errorf("expected %#v to have a reponse for %#v but not", pe, tc.secondary)
+		if len(tc.after.Resources) != len(store.Resources) {
+			t.Errorf("(%d) [len(Resources)] expected: %d, got: %d", i, len(tc.after.Resources), len(store.Resources))
 		}
 
-		for k := range tc.rep.HeaderMap {
-			if len(tc.rep.HeaderMap) != len(rep.HeaderMap) {
-				t.Errorf("expected %d, got %d", len(tc.rep.HeaderMap), len(rep.HeaderMap))
+		for resKey, res := range tc.after.Resources {
+			if len(res.Fields) != len(store.Resources[resKey].Fields) {
+				t.Errorf("(%d) [len(Resources[%s].Fields)] expected: %d, got: %d", i, resKey, len(res.Fields), len(store.Resources[resKey].Fields))
+				continue
 			}
-			for i := 0; i < len(tc.rep.HeaderMap[k]); i++ {
-				if tc.rep.HeaderMap[k][i] != rep.HeaderMap[k][i] {
-					t.Errorf("for header %s, expected %#v, got %#v", k, tc.rep.HeaderMap[k][i], rep.HeaderMap[k][i])
+
+			for j, f := range res.Fields {
+				if f != store.Resources[resKey].Fields[j] {
+					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, f, store.Resources[resKey].Fields[j])
 				}
 			}
 		}
 
-		if string(tc.rep.Body) != string(rep.Body) {
-			t.Errorf("expected %#v, got %#v", string(tc.rep.Body), string(rep.Body))
-		}
+		for key, rep := range tc.after.Representations {
+			if rep.StatusCode != store.Representations[key].StatusCode {
+				t.Errorf("(%d) expected: %d, got: %d", i, rep.StatusCode, store.Representations[key].StatusCode)
+			}
 
-		if tc.store.History.Len() != 1 {
-			t.Errorf("expected 1, got %d", tc.store.History.Len())
-		}
-
-		k := tc.store.History.Front().Value.(key)
-		if tc.primary != k.resource {
-			t.Errorf("expected %v, got %v", tc.primary, k.resource)
-		}
-		if tc.secondary != k.representation {
-			t.Errorf("expected %v, got %v", tc.primary, k.resource)
+			if string(rep.Body) != string(store.Representations[key].Body) {
+				t.Errorf("(%d) expected: %s, got: %s", i, string(rep.Body), string(store.Representations[key].Body))
+			}
 		}
 	}
 }
 
 func TestStore_Purge(t *testing.T) {
-	reps := []*Representation{
-		{
-			Body: []byte(`{"test":"ok"}`),
-		},
-		{
-			Body: []byte(`{"foo":"bar"}`),
-		},
-	}
-
-	keys := []key{
-		{
-			resource: ResourceKey{
-				Host: "www.example.com",
-				Path: "/test",
-			},
-			representation: RepresentationKey{
-				Method: http.MethodGet,
-				Key:    "",
-			},
-		},
-		{
-			resource: ResourceKey{
-				Host: "www.example.com",
-				Path: "/foo",
-			},
-			representation: RepresentationKey{
-				Method: http.MethodGet,
-				Key:    "",
-			},
-		},
-	}
-
-	history := func(reps []*Representation, keys []key) *list.List {
-		l := list.New()
-		for i, rep := range reps {
-			rep.Element = l.PushBack(keys[i])
-		}
-		return l
-	}
-
 	testCases := []struct {
 		before *Store
 		req    *http.Request
@@ -325,31 +389,30 @@ func TestStore_Purge(t *testing.T) {
 				},
 			},
 
-			after: &Store{
-				History: history(nil, nil),
-			},
+			after: &Store{},
 		},
 		{ // when it's cached
 			before: &Store{
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/test"}: {
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: ""}: reps[0],
+					{Host: "www.example.com", Path: "/test"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
 						},
 					},
-					ResourceKey{Host: "www.example.com", Path: "/foo"}: {
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: ""}: reps[1],
+					{Host: "www.example.com", Path: "/foo"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
 						},
 					},
 				},
-				History: history([]*Representation{
-					reps[0],
-					reps[1],
-				}, []key{
-					keys[0],
-					keys[1],
-				}),
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"test":"ok"}`),
+					},
+					{ResourceKey{Host: "www.example.com", Path: "/foo"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"foo":"bar"}`),
+					},
+				},
 			},
 			req: &http.Request{
 				Method: http.MethodGet,
@@ -361,17 +424,17 @@ func TestStore_Purge(t *testing.T) {
 
 			after: &Store{
 				Resources: map[ResourceKey]*Resource{
-					ResourceKey{Host: "www.example.com", Path: "/foo"}: {
-						Representations: map[RepresentationKey]*Representation{
-							{Method: http.MethodGet, Key: ""}: reps[1],
+					{Host: "www.example.com", Path: "/foo"}: {
+						RepresentationKeys: map[RepresentationKey]struct{}{
+							{Method: http.MethodGet, Key: ""}: {},
 						},
 					},
 				},
-				History: history([]*Representation{
-					reps[1],
-				}, []key{
-					keys[1],
-				}),
+				Representations: map[Key]*Representation{
+					{ResourceKey{Host: "www.example.com", Path: "/foo"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+						Body: []byte(`{"foo":"bar"}`),
+					},
+				},
 			},
 		},
 	}
@@ -395,35 +458,114 @@ func TestStore_Purge(t *testing.T) {
 					t.Errorf("(%d, %d) expected: %s, got: %s", i, j, f, store.Resources[resKey].Fields[j])
 				}
 			}
-
-			for repKey, rep := range res.Representations {
-				if rep.StatusCode != store.Resources[resKey].Representations[repKey].StatusCode {
-					t.Errorf("(%d) expected: %d, got: %d", i, rep.StatusCode, store.Resources[resKey].Representations[repKey].StatusCode)
-				}
-
-				if string(rep.Body) != string(store.Resources[resKey].Representations[repKey].Body) {
-					t.Errorf("(%d) expected: %s, got: %s", i, string(rep.Body), string(store.Resources[resKey].Representations[repKey].Body))
-				}
-			}
 		}
 
-		if tc.after.History.Len() != store.History.Len() {
-			t.Errorf("(%d) expected: %d, got: %d", i, tc.after.History.Len(), store.History.Len())
-		}
-
-		e := tc.after.History.Front()
-		g := store.History.Front()
-		for e != nil && g != nil {
-			if _, ok := e.Value.(key); !ok {
-				t.Errorf("(%d) [e] expected key, got: %#v", i, e.Value)
+		for key, rep := range tc.after.Representations {
+			if rep.StatusCode != store.Representations[key].StatusCode {
+				t.Errorf("(%d) expected: %d, got: %d", i, rep.StatusCode, store.Representations[key].StatusCode)
 			}
 
-			if _, ok := g.Value.(key); !ok {
-				t.Errorf("(%d) [g] expected key, got: %#v", i, g.Value)
+			if string(rep.Body) != string(store.Representations[key].Body) {
+				t.Errorf("(%d) expected: %s, got: %s", i, string(rep.Body), string(store.Representations[key].Body))
 			}
 
-			e = e.Next()
-			g = g.Next()
 		}
+	}
+}
+
+func BenchmarkStore_Get(b *testing.B) {
+	store := Store{
+		Resources: map[ResourceKey]*Resource{
+			{Host: "www.example.com", Path: "/test"}: {
+				RepresentationKeys: map[RepresentationKey]struct{}{
+					{Method: http.MethodGet, Key: ""}: {},
+				},
+			},
+		},
+		Representations: map[Key]*Representation{
+			{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+				Body: []byte(`{
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
+}`),
+			},
+		},
+	}
+
+	req := http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Host: "www.example.com",
+			Path: "/test",
+		},
+	}
+
+	for i := 0; i < b.N; i++ {
+		store.Get(&req)
+	}
+}
+
+func BenchmarkStore_Set(b *testing.B) {
+	store := Store{
+		Max:    1 * 1024 * 1024,
+		Sample: 3,
+	}
+
+	req := http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Host: "www.example.com",
+			Path: "/test",
+		},
+	}
+
+	resp := Representation{
+		Body: []byte(`{
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
+}`),
+	}
+
+	for i := 0; i < b.N; i++ {
+		store.Set(&req, &resp)
+	}
+}
+
+func BenchmarkStore_Purge(b *testing.B) {
+	store := Store{
+		Max:    1 * 1024 * 1024,
+		Sample: 3,
+	}
+
+	req := http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Host: "www.example.com",
+			Path: "/test",
+		},
+	}
+
+	resp := Representation{
+		Body: []byte(`{
+  "_links": {
+    "self": {"href": "/movies/1"},
+    "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
+  },
+  "title": "Pulp Fiction",
+  "year": 1994
+}`),
+	}
+
+	for i := 0; i < b.N; i++ {
+		store.Set(&req, &resp)
+		store.Purge(&req)
 	}
 }

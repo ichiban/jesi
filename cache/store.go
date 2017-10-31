@@ -1,10 +1,8 @@
 package cache
 
 import (
-	"container/list"
 	"net/http"
 	"net/url"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -15,12 +13,14 @@ import (
 	"github.com/ichiban/jesi/transaction"
 )
 
-// Store stores pairs of requests/responses.
+// Store stores pairs of request/response.
 type Store struct {
 	sync.RWMutex
 	Resources       map[ResourceKey]*Resource
-	History         *list.List
-	Max             int
+	Representations map[Key]*Representation
+	Max             uint64
+	InUse           uint64
+	Sample          uint
 	OriginChangedAt time.Time
 }
 
@@ -39,73 +39,68 @@ func (s *Store) Set(req *http.Request, rep *Representation) {
 	}
 
 	repKey := NewRepresentationKey(res, req)
-	if old, ok := res.Representations[repKey]; ok && old.Element != nil {
-		s.History.Remove(old.Element)
 
+	key := Key{resKey, repKey}
+	if old, ok := s.Representations[key]; ok {
+		s.InUse -= uint64(len(old.Body))
 		log.WithFields(log.Fields{
 			"id": old.ID,
 		}).Info("Removed a representation")
 	}
-	res.Representations[repKey] = rep
+	res.RepresentationKeys[repKey] = struct{}{}
+	s.Representations[key] = rep
+	rep.LastUsedTime = time.Now()
 
 	log.WithFields(log.Fields{
 		"id":          rep.ID,
 		"transaction": transaction.ID(req),
 	}).Info("Added a representation")
 
-	rep.Element = s.History.PushFront(key{resource: resKey, representation: repKey})
+	s.InUse += uint64(len(rep.Body))
 
 	if s.Max == 0 {
 		return
 	}
 
-	maxInBytes := uint64(s.Max) * 1024 * 1024 // MB
-
-	var stats runtime.MemStats
-	for i := 0; i < s.History.Len(); i++ {
-		runtime.ReadMemStats(&stats)
-
-		log.WithFields(log.Fields{
-			"inuse": stats.HeapInuse,
-			"max":   s.Max,
-		}).Debug("Read memory stats")
-
-		if stats.HeapInuse < maxInBytes {
-			break
-		}
-
-		s.evictLRU()
+	for s.InUse > s.Max {
+		s.evict()
 	}
 }
 
-func (s *Store) evictLRU() {
-	e := s.History.Back()
-	if e == nil {
-		log.Warn("Couldn't find a cached response to free")
+func (s *Store) evict() {
+	var minKey Key
+	var minRep *Representation
+	i := s.Sample
+	for key, rep := range s.Representations {
+		if i == 0 {
+			break
+		}
+
+		if minRep != nil && less(minRep, rep) {
+			continue
+		}
+
+		minKey = key
+		minRep = rep
+
+		i--
+	}
+
+	res, ok := s.Resources[minKey.ResourceKey]
+	if !ok {
 		return
 	}
-	s.History.Remove(e)
-	k, ok := e.Value.(key)
-	if !ok {
-		log.Fatalf("failed to coerce a history element to key: %#v", e.Value)
+	delete(res.RepresentationKeys, minKey.RepresentationKey)
+	if len(res.RepresentationKeys) == 0 {
+		delete(s.Resources, minKey.ResourceKey)
 	}
 
-	res, ok := s.Resources[k.resource]
-	if !ok {
-		return
-	}
+	delete(s.Representations, minKey)
+	s.InUse -= uint64(len(minRep.Body))
 
-	if rep, ok := res.Representations[k.representation]; ok {
-		delete(res.Representations, k.representation)
-
-		log.WithFields(log.Fields{
-			"id": rep.ID,
-		}).Info("Removed a representation")
-	}
-
-	if len(res.Representations) == 0 {
-		delete(s.Resources, k.resource)
-	}
+	log.WithFields(log.Fields{
+		"id": minRep.ID,
+	}).Info("Removed a representation")
 }
 
 // Get retrieves a cached response.
@@ -122,14 +117,15 @@ func (s *Store) Get(req *http.Request) *Representation {
 	}
 
 	repKey := NewRepresentationKey(res, req)
-	rep, ok := res.Representations[repKey]
+	key := Key{resKey, repKey}
+	rep, ok := s.Representations[key]
 	if !ok {
 		return nil
 	}
 
-	if rep.Element != nil {
-		s.History.MoveToFront(rep.Element)
-	}
+	rep.Lock()
+	defer rep.Unlock()
+	rep.LastUsedTime = time.Now()
 
 	log.WithFields(log.Fields{
 		"id": rep.ID,
@@ -142,8 +138,8 @@ func (s *Store) Get(req *http.Request) *Representation {
 func (s *Store) Purge(req *http.Request) {
 	s.init()
 
-	s.RLock()
-	defer s.RUnlock()
+	s.Lock()
+	defer s.Unlock()
 
 	resKey := NewResourceKey(req)
 	res, ok := s.Resources[resKey]
@@ -152,8 +148,14 @@ func (s *Store) Purge(req *http.Request) {
 	}
 	delete(s.Resources, resKey)
 
-	for _, rep := range res.Representations {
-		s.History.Remove(rep.Element)
+	for repKey := range res.RepresentationKeys {
+		key := Key{resKey, repKey}
+		rep, ok := s.Representations[key]
+		if !ok {
+			continue
+		}
+		delete(s.Representations, key)
+		s.InUse -= uint64(len(rep.Body))
 
 		log.WithFields(log.Fields{
 			"id": rep.ID,
@@ -168,13 +170,18 @@ func (s *Store) init() {
 	if s.Resources == nil {
 		s.Resources = make(map[ResourceKey]*Resource)
 	}
-
-	if s.History == nil {
-		s.History = list.New()
+	if s.Representations == nil {
+		s.Representations = make(map[Key]*Representation)
 	}
 }
 
-// ResourceKey identifies resources with the same URL.
+// Key identifies a representation.
+type Key struct {
+	ResourceKey
+	RepresentationKey
+}
+
+// ResourceKey identifies a resource.
 type ResourceKey struct {
 	Host  string `json:"host"`
 	Path  string `json:"path"`
@@ -190,40 +197,41 @@ func NewResourceKey(req *http.Request) ResourceKey {
 	}
 }
 
-// Resource represents cached responses with the same URL.
+// Resource represents a set of representations with the same URL.
 type Resource struct {
-	Fields          []string
-	Representations map[RepresentationKey]*Representation
+	Unique             bool
+	Fields             []string
+	RepresentationKeys map[RepresentationKey]struct{}
 }
 
-// NewResource constructs a new variations for the cached response.
+// NewResource constructs a resource from a representation.
 func NewResource(rep *Representation) *Resource {
-	var fields []string
+	res := Resource{
+		RepresentationKeys: make(map[RepresentationKey]struct{}),
+	}
 
 	for _, vary := range rep.HeaderMap["Vary"] {
+		vary = strings.TrimSpace(vary)
+		if vary == "*" {
+			res.Unique = true
+			res.Fields = nil
+			return &res
+		}
 		for _, field := range strings.Split(vary, ",") {
-			if field == "*" {
-				return nil
-			}
-			fields = append(fields, http.CanonicalHeaderKey(strings.Trim(field, " ")))
+			res.Fields = append(res.Fields, http.CanonicalHeaderKey(strings.TrimSpace(field)))
 		}
 	}
 
-	res := &Resource{
-		Fields:          fields,
-		Representations: make(map[RepresentationKey]*Representation),
-	}
-
-	return res
+	return &res
 }
 
-// RepresentationKey identifies a cached response in variations.
+// RepresentationKey identifies a representation in a resource.
 type RepresentationKey struct {
 	Method string
 	Key    string
 }
 
-// NewRepresentationKey constructs a new variation key from a request.
+// NewRepresentationKey constructs a representation key from a request.
 func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 	var keys []string
 	for _, fields := range res.Fields {
@@ -253,11 +261,6 @@ func NewRepresentationKey(res *Resource, req *http.Request) RepresentationKey {
 		Method: req.Method,
 		Key:    vals.Encode(),
 	}
-}
-
-type key struct {
-	resource       ResourceKey
-	representation RepresentationKey
 }
 
 // CachedState represents freshness of a cached response.
@@ -334,4 +337,8 @@ func (s CachedState) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+func less(a, b *Representation) bool {
+	return a.LastUsedTime.Before(b.LastUsedTime)
 }

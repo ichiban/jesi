@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/) 
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [Unreleased]
+### Added
+
+- Load balancing
+- Transaction logging
+- Control layer protected by bearer token
+- Log stream
+- PURGE method to delete cached representations
+
+### Changed
+
+- LRU cache eviction is now random-sampled
+
+### Fixed
+
+- Fix confusion about no-cache and no-store
+
 ## [v0.2.0] - 2017-02-12
 ### Added
 

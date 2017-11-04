@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - Control layer protected by bearer token
 - Log stream
 - PURGE method to delete cached representations
+- Embedding with `With` header field
 
 ### Changed
 

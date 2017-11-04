@@ -27,6 +27,7 @@ const (
 	warningField      = "Warning"
 	etagField         = "Etag"
 	expiresField      = "Expires"
+	withField         = "With"
 )
 
 var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
@@ -112,6 +113,16 @@ func stripSpec(req *http.Request) specifier {
 	q := req.URL.Query()
 	q.Del(with)
 	req.URL.RawQuery = q.Encode()
+
+	for _, ws := range req.Header[withField] {
+		for _, w := range strings.Split(ws, ",") {
+			w = strings.TrimSpace(w)
+			if strings.HasPrefix(w, `"`) {
+				w = w[1 : len(w)-1]
+			}
+			spec.add(strings.Split(w, "."))
+		}
+	}
 
 	return spec
 }

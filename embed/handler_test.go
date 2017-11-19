@@ -28,7 +28,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			url: "/a?with=foo.bar.baz",
 			resources: map[string]*testResource{
 				"/a": {
-					header: http.Header{"Content-Type": []string{"application/json"}},
+					header: http.Header{"Content-Type": []string{"application/vnd.custom+json"}},
 					body:   `{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`,
 				},
 				"/b": {
@@ -36,7 +36,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 					body:   `{"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}`,
 				},
 				"/c": {
-					header: http.Header{"Content-Type": []string{"application/json"}},
+					header: http.Header{"Content-Type": []string{"application/hal+json"}},
 					body:   `{"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}`,
 				},
 			},

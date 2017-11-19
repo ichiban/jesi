@@ -29,7 +29,7 @@ const (
 	expiresField      = "Expires"
 )
 
-var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
+var jsonPattern = regexp.MustCompile(`\Aapplication/(?:.+\+)?json`)
 
 // Handler is an embedding handler.
 type Handler struct {

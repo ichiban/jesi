@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path"
 	"regexp"
 	"strings"
 
@@ -71,12 +70,6 @@ func (h *Handler) direct(r *http.Request) error {
 
 	r.URL.Scheme = b.URL.Scheme
 	r.URL.Host = b.URL.Host
-	r.URL.Path = path.Join(b.URL.Path, r.URL.Path)
-	if b.URL.RawQuery == "" || r.URL.RawQuery == "" {
-		r.URL.RawQuery = b.URL.RawQuery + r.URL.RawQuery
-	} else {
-		r.URL.RawQuery = b.URL.RawQuery + "&" + r.URL.RawQuery
-	}
 
 	log.WithFields(log.Fields{
 		"id":  transaction.ID(r),

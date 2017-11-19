@@ -50,7 +50,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		{ // if there're multiple backends available, it spreads the workload across them.
 			backends: []*Backend{
 				{URL: &url.URL{Scheme: "https", Host: "a.example.com"}},
-				{URL: &url.URL{Scheme: "https", Host: "b.example.com"}},
+				{URL: &url.URL{Scheme: "https", Host: "b.example.com", Path:"/path/ignored", RawQuery:"query=ignored"}},
 				{URL: &url.URL{Scheme: "https", Host: "c.example.com"}},
 			},
 			givenReqs: []*http.Request{

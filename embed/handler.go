@@ -13,6 +13,7 @@ import (
 	"github.com/ichiban/jesi/cache"
 	"github.com/ichiban/jesi/transaction"
 	log "github.com/sirupsen/logrus"
+	"strconv"
 )
 
 const (
@@ -22,12 +23,14 @@ const (
 	links    = "_links"
 	embedded = "_embedded"
 
-	cacheControlField = "Cache-Control"
-	contentTypeField  = "Content-Type"
-	warningField      = "Warning"
-	etagField         = "Etag"
-	expiresField      = "Expires"
-	withField         = "With"
+	cacheControlField  = "Cache-Control"
+	contentTypeField   = "Content-Type"
+	contentLengthField = "Content-Length"
+
+	warningField = "Warning"
+	etagField    = "Etag"
+	expiresField = "Expires"
+	withField    = "With"
 )
 
 var jsonPattern = regexp.MustCompile(`\Aapplication/(?:json|hal\+json)`)
@@ -46,6 +49,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rep := cache.NewRepresentation(h.Next, r)
 	defer func() {
+		rep.HeaderMap.Set(contentLengthField, strconv.Itoa(len(rep.Body)))
 		if _, err := rep.WriteTo(w); err != nil {
 			log.WithFields(log.Fields{
 				"id":    transaction.ID(r),

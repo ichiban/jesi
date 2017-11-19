@@ -28,6 +28,13 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Cache-Control":  []string{""},
+					"Content-Length": []string{"2"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"99914b932bd37a50b983c5e7c90ae93b"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
+				},
 				Body: []byte(`{}`),
 			},
 		},
@@ -54,6 +61,13 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Cache-Control":  []string{""},
+					"Content-Length": []string{"217"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"f7ff6c96d46da9b24176e5a56eb77f72"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
+				},
 				Body: []byte(`{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{},"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}},"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
 		},
@@ -88,6 +102,13 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Cache-Control":  []string{""},
+					"Content-Length": []string{"433"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"7a58566511e7b1baa3428baa18db53f6"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
+				},
 				Body: []byte(`{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{"baz":{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}},"_links":{"baz":{"href":"/a"},"self":{"href":"/c"}}},"qux":{"_embedded":{"quux":{"_links":{"corge":{"href":"/a"},"self":{"href":"/e"}}}},"_links":{"quux":{"href":"/e"},"self":{"href":"/d"}}}},"_links":{"bar":{"href":"/c"},"qux":{"href":"/d"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
 		},
@@ -124,6 +145,13 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Cache-Control":  []string{""},
+					"Content-Length": []string{"433"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"7a58566511e7b1baa3428baa18db53f6"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
+				},
 				Body: []byte(`{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{"baz":{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}},"_links":{"baz":{"href":"/a"},"self":{"href":"/c"}}},"qux":{"_embedded":{"quux":{"_links":{"corge":{"href":"/a"},"self":{"href":"/e"}}}},"_links":{"quux":{"href":"/e"},"self":{"href":"/d"}}}},"_links":{"bar":{"href":"/c"},"qux":{"href":"/d"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
 		},
@@ -161,10 +189,17 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Cache-Control":  []string{""},
+					"Content-Length": []string{"433"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"7a58566511e7b1baa3428baa18db53f6"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
+				},
 				Body: []byte(`{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{"baz":{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}},"_links":{"baz":{"href":"/a"},"self":{"href":"/c"}}},"qux":{"_embedded":{"quux":{"_links":{"corge":{"href":"/a"},"self":{"href":"/e"}}}},"_links":{"quux":{"href":"/e"},"self":{"href":"/d"}}}},"_links":{"bar":{"href":"/c"},"qux":{"href":"/d"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
 		},
-		{ // if the response is not JSON, it simply returns the response.
+		{ // if the response is not JSON, it simply returns it.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL: &url.URL{
@@ -179,6 +214,10 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Content-Length": []string{"53"},
+					"Content-Type":   []string{"application/xml"},
+				},
 				Body: []byte(`{"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
 		},
@@ -197,6 +236,13 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			resp: &cache.Representation{
+				HeaderMap: http.Header{
+					"Cache-Control":  []string{"no-store"},
+					"Content-Length": []string{"222"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"d35bc68f2f78bd21a74246002f5d724e"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
+				},
 				Body: []byte(`{"_embedded":{"foo":{"type":"https://ichiban.github.io/jesi/problems/response-error","title":"Response Error","status":404,"detail":"Not Found","_links":{"about":"/b"}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
 		},
@@ -233,8 +279,11 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			},
 			resp: &cache.Representation{
 				HeaderMap: http.Header{
-					"Content-Type":  []string{"application/json"},
-					"Cache-Control": []string{"private,max-age=10"},
+					"Cache-Control":  []string{"private,max-age=10"},
+					"Content-Length": []string{"217"},
+					"Content-Type":   []string{"application/json"},
+					"Etag":           []string{`W/"f7ff6c96d46da9b24176e5a56eb77f72"`},
+					"Warning":        []string{`214 - "Transformation Applied"`},
 				},
 				Body: []byte(`{"_embedded":{"foo":{"_embedded":{"bar":{"_embedded":{},"_links":{"next":{"href":"/a"},"self":{"href":"/c"}}}},"_links":{"bar":{"href":"/c"},"self":{"href":"/b"}}}},"_links":{"foo":{"href":"/b"},"self":{"href":"/a"}}}`),
 			},
@@ -255,12 +304,15 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			t.Errorf("(%d) expected 200, got %d, %s", i, rep.StatusCode, tc.req.URL)
 		}
 
+		if len(tc.resp.HeaderMap) != len(rep.HeaderMap) {
+			t.Errorf("(%d) [len(HeaderMap)] expected %#v, got %#v", i, tc.resp.HeaderMap, rep.HeaderMap)
+		}
+
 		for k, vs := range tc.resp.HeaderMap {
 			for i, v := range vs {
 				if v != rep.HeaderMap[k][i] {
 					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, rep.HeaderMap[k][i])
 				}
-
 			}
 		}
 

@@ -64,7 +64,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				HeaderMap: http.Header{
 					"Cache-Control":  []string{""},
 					"Content-Length": []string{"217"},
-					"Content-Type":   []string{"application/json"},
+					"Content-Type":   []string{"application/vnd.custom+json"},
 					"Etag":           []string{`W/"f7ff6c96d46da9b24176e5a56eb77f72"`},
 					"Warning":        []string{`214 - "Transformation Applied"`},
 				},
@@ -309,9 +309,9 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		}
 
 		for k, vs := range tc.resp.HeaderMap {
-			for i, v := range vs {
-				if v != rep.HeaderMap[k][i] {
-					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, rep.HeaderMap[k][i])
+			for j, v := range vs {
+				if v != rep.HeaderMap[k][j] {
+					t.Errorf("(%d) (%s) expected %s, got %s", i, k, v, rep.HeaderMap[k][j])
 				}
 			}
 		}

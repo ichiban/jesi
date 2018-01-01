@@ -1,6 +1,8 @@
-hash: aa17a221f96effff92c79df3a90d9c9cf9058f43446f84e9f96f00dce982076d
-updated: 2017-07-17T15:07:45.174248638+09:00
+hash: e417fe77aabef8570b016363e52feea496ae96cbcd034c04daee182e29a86c9c
+updated: 2017-12-23T19:53:03.363631+09:00
 imports:
+- name: github.com/go-chi/chi
+  version: e83ac2304db3c50cf03d96a2fcd39009d458bc35
 - name: github.com/satori/go.uuid
   version: 5bf94b69c6b68ee1b541973bb8e1144db23a194b
 - name: github.com/sirupsen/logrus
@@ -9,4 +11,4 @@ imports:
   version: 4cd6d1a821c7175768725b55ca82f14683a29ea4
   subpackages:
   - unix
-devImports: []
+testImports: []

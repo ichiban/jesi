@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/satori/go.uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/ichiban/jesi/transaction"
@@ -17,7 +18,7 @@ import (
 type Store struct {
 	sync.RWMutex
 	Resources       map[ResourceKey]*Resource
-	Representations map[Key]*Representation
+	Representations map[uuid.UUID]*Representation
 	Max             uint64
 	InUse           uint64
 	Sample          uint
@@ -26,7 +27,7 @@ type Store struct {
 
 // Set inserts/updates a new pair of request/response to the cache.
 func (s *Store) Set(req *http.Request, rep *Representation) {
-	s.init()
+	s.Init()
 
 	s.Lock()
 	defer s.Unlock()
@@ -34,21 +35,21 @@ func (s *Store) Set(req *http.Request, rep *Representation) {
 	resKey := NewResourceKey(req)
 	res, ok := s.Resources[resKey]
 	if !ok {
-		res = NewResource(rep)
+		res = NewResource(req, rep)
 		s.Resources[resKey] = res
 	}
 
 	repKey := NewRepresentationKey(res, req)
-
-	key := Key{resKey, repKey}
-	if old, ok := s.Representations[key]; ok {
+	if old, ok := res.Representations[repKey]; ok {
 		s.InUse -= uint64(len(old.Body))
 		log.WithFields(log.Fields{
 			"id": old.ID,
 		}).Info("Removed a representation")
 	}
-	res.RepresentationKeys[repKey] = struct{}{}
-	s.Representations[key] = rep
+	res.Representations[repKey] = rep
+	rep.ResourceKey = resKey
+	rep.RepresentationKey = repKey
+	s.Representations[rep.ID] = rep
 	rep.LastUsedTime = time.Now()
 
 	log.WithFields(log.Fields{
@@ -68,10 +69,10 @@ func (s *Store) Set(req *http.Request, rep *Representation) {
 }
 
 func (s *Store) evict() {
-	var minKey Key
+	var minID uuid.UUID
 	var minRep *Representation
 	i := s.Sample
-	for key, rep := range s.Representations {
+	for id, rep := range s.Representations {
 		if i == 0 {
 			break
 		}
@@ -80,22 +81,19 @@ func (s *Store) evict() {
 			continue
 		}
 
-		minKey = key
+		minID = id
 		minRep = rep
 
 		i--
 	}
 
-	res, ok := s.Resources[minKey.ResourceKey]
-	if !ok {
-		return
-	}
-	delete(res.RepresentationKeys, minKey.RepresentationKey)
-	if len(res.RepresentationKeys) == 0 {
-		delete(s.Resources, minKey.ResourceKey)
+	res := s.Resources[minRep.ResourceKey]
+	delete(res.Representations, minRep.RepresentationKey)
+	if len(res.Representations) == 0 {
+		delete(s.Resources, res.ResourceKey)
 	}
 
-	delete(s.Representations, minKey)
+	delete(s.Representations, minID)
 	s.InUse -= uint64(len(minRep.Body))
 
 	log.WithFields(log.Fields{
@@ -105,7 +103,7 @@ func (s *Store) evict() {
 
 // Get retrieves a cached response.
 func (s *Store) Get(req *http.Request) *Representation {
-	s.init()
+	s.Init()
 
 	s.RLock()
 	defer s.RUnlock()
@@ -117,8 +115,7 @@ func (s *Store) Get(req *http.Request) *Representation {
 	}
 
 	repKey := NewRepresentationKey(res, req)
-	key := Key{resKey, repKey}
-	rep, ok := s.Representations[key]
+	rep, ok := res.Representations[repKey]
 	if !ok {
 		return nil
 	}
@@ -135,8 +132,8 @@ func (s *Store) Get(req *http.Request) *Representation {
 }
 
 // Purge removes any representations associated to the request.
-func (s *Store) Purge(req *http.Request) {
-	s.init()
+func (s *Store) Purge(req *http.Request) *Resource {
+	s.Init()
 
 	s.Lock()
 	defer s.Unlock()
@@ -144,26 +141,26 @@ func (s *Store) Purge(req *http.Request) {
 	resKey := NewResourceKey(req)
 	res, ok := s.Resources[resKey]
 	if !ok {
-		return
+		return nil
 	}
 	delete(s.Resources, resKey)
 
-	for repKey := range res.RepresentationKeys {
-		key := Key{resKey, repKey}
-		rep, ok := s.Representations[key]
+	for repKey := range res.Representations {
+		rep, ok := res.Representations[repKey]
 		if !ok {
 			continue
 		}
-		delete(s.Representations, key)
 		s.InUse -= uint64(len(rep.Body))
 
 		log.WithFields(log.Fields{
 			"id": rep.ID,
 		}).Info("Removed a representation")
 	}
+
+	return res
 }
 
-func (s *Store) init() {
+func (s *Store) Init() {
 	s.Lock()
 	defer s.Unlock()
 
@@ -171,14 +168,13 @@ func (s *Store) init() {
 		s.Resources = make(map[ResourceKey]*Resource)
 	}
 	if s.Representations == nil {
-		s.Representations = make(map[Key]*Representation)
+		s.Representations = make(map[uuid.UUID]*Representation)
+		for _, res := range s.Resources {
+			for _, rep := range res.Representations {
+				s.Representations[rep.ID] = rep
+			}
+		}
 	}
-}
-
-// Key identifies a representation.
-type Key struct {
-	ResourceKey
-	RepresentationKey
 }
 
 // ResourceKey identifies a resource.
@@ -199,15 +195,17 @@ func NewResourceKey(req *http.Request) ResourceKey {
 
 // Resource represents a set of representations with the same URL.
 type Resource struct {
-	Unique             bool
-	Fields             []string
-	RepresentationKeys map[RepresentationKey]struct{}
+	ResourceKey
+	Unique          bool
+	Fields          []string
+	Representations map[RepresentationKey]*Representation
 }
 
 // NewResource constructs a resource from a representation.
-func NewResource(rep *Representation) *Resource {
+func NewResource(req *http.Request, rep *Representation) *Resource {
 	res := Resource{
-		RepresentationKeys: make(map[RepresentationKey]struct{}),
+		ResourceKey:     NewResourceKey(req),
+		Representations: make(map[RepresentationKey]*Representation),
 	}
 
 	for _, vary := range rep.HeaderMap["Vary"] {

@@ -1,23 +1,20 @@
 package control
 
 import (
-	"context"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/ichiban/jesi/cache"
+	"github.com/satori/go.uuid"
 )
 
 func TestHandler_ServeHTTP(t *testing.T) {
 	testCases := []struct {
 		secret string
 		req    *http.Request
-		logs   []*log.Entry
 
 		passThrough bool
 		resp        *http.Response
@@ -26,7 +23,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL: &url.URL{
-					Path: "/logs",
+					Host: "www.example.com",
+					Path: "/_jesi/resources",
 				},
 			},
 
@@ -37,7 +35,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL: &url.URL{
-					Path: "/logs",
+					Host: "www.example.com",
+					Path: "/_jesi/resources",
 				},
 			},
 
@@ -48,7 +47,8 @@ func TestHandler_ServeHTTP(t *testing.T) {
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL: &url.URL{
-					Path: "/logs",
+					Host: "www.example.com",
+					Path: "/_jesi/resources",
 				},
 				Header: http.Header{
 					"Authorization": []string{"bearer bar"},
@@ -57,12 +57,116 @@ func TestHandler_ServeHTTP(t *testing.T) {
 
 			passThrough: true,
 		},
-		{ // unknown method
+		{ // unknown endpoint
 			secret: "foo",
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL: &url.URL{
-					Path: "/unknown",
+					Host: "www.example.com",
+					Path: "/_jesi/unknown",
+				},
+				Header: http.Header{
+					"Authorization": []string{"bearer foo"},
+				},
+			},
+
+			resp: &http.Response{
+				StatusCode: http.StatusNotFound,
+				Header: http.Header{
+					"Content-Type":           []string{"text/plain; charset=utf-8"},
+					"X-Content-Type-Options": []string{"nosniff"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader("404 page not found\n")),
+			},
+		},
+		{ // resources
+			secret: "foo",
+			req: &http.Request{
+				Method: http.MethodGet,
+				URL: &url.URL{
+					Host: "www.example.com",
+					Path: "/_jesi/resources",
+				},
+				Header: http.Header{
+					"Authorization": []string{"bearer foo"},
+				},
+			},
+
+			resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": {"application/hal+json"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader(`{"_links":{"self":{"href":"//www.example.com/_jesi/resources"},"elements":[{"href":"//www.example.com/_jesi/resources/foo"}]}}`)),
+			},
+		},
+		{ // resource
+			secret: "foo",
+			req: &http.Request{
+				Method: http.MethodGet,
+				URL: &url.URL{
+					Host: "www.example.com",
+					Path: "/_jesi/resources/foo",
+				},
+				Header: http.Header{
+					"Authorization": []string{"bearer foo"},
+				},
+			},
+
+			resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": {"application/hal+json"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader(`{"_links":{"self":{"href":"//www.example.com/_jesi/resources/foo"},"about":{"href":"//www.example.com/foo"},"reps":[{"href":"//www.example.com/_jesi/reps/%25s/026a1a9d-4744-4812-b4c7-0b83feda7244"}]},"unique":false,"fields":null}`)),
+			},
+		},
+		{ // representation
+			secret: "foo",
+			req: &http.Request{
+				Method: http.MethodGet,
+				URL: &url.URL{
+					Host: "www.example.com",
+					Path: "/_jesi/reps/026a1a9d-4744-4812-b4c7-0b83feda7244",
+				},
+				Header: http.Header{
+					"Authorization": []string{"bearer foo"},
+				},
+			},
+
+			resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header: http.Header{
+					"Content-Type": {"application/hal+json"},
+				},
+				Body: ioutil.NopCloser(strings.NewReader(`{"_links":{"self":{"href":"//www.example.com/_jesi/reps/%25s/026a1a9d-4744-4812-b4c7-0b83feda7244"},"resource":{"href":"//www.example.com/_jesi/resources/foo"}},"status":0,"header":null,"contentLength":0,"requestTime":"0001-01-01T00:00:00Z","responseTime":"0001-01-01T00:00:00Z","lastUsedTime":"0001-01-01T00:00:00Z"}`)),
+			},
+		},
+		{ // purge success
+			secret: "foo",
+			req: &http.Request{
+				Method: "PURGE",
+				URL: &url.URL{
+					Host: "www.example.com",
+					Path: "/foo",
+				},
+				Header: http.Header{
+					"Authorization": []string{"bearer foo"},
+				},
+			},
+
+			resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       ioutil.NopCloser(strings.NewReader(`{"_links":{"self":{"href":"//www.example.com/_jesi/resources/foo"},"about":{"href":"//www.example.com/foo"}},"_embed":{"reps":[{"_links":{"self":{"href":"//www.example.com/_jesi/reps/%25s/026a1a9d-4744-4812-b4c7-0b83feda7244"},"resource":{"href":"//www.example.com/_jesi/resources/foo"}},"status":0,"header":null,"contentLength":0,"requestTime":"0001-01-01T00:00:00Z","responseTime":"0001-01-01T00:00:00Z","lastUsedTime":"0001-01-01T00:00:00Z"}]},"unique":false,"fields":null}`)),
+			},
+		},
+		{ // purge failure
+			secret: "foo",
+			req: &http.Request{
+				Method: "PURGE",
+				URL: &url.URL{
+					Host: "www.example.com",
+					Path: "/bar",
 				},
 				Header: http.Header{
 					"Authorization": []string{"bearer foo"},
@@ -74,63 +178,38 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Body:       ioutil.NopCloser(strings.NewReader("")),
 			},
 		},
-		{ // logs
-			secret: "foo",
-			req: &http.Request{
-				Method: http.MethodGet,
-				URL: &url.URL{
-					Path: "/logs",
-				},
-				Header: http.Header{
-					"Authorization": []string{"bearer foo"},
-				},
-			},
-			logs: []*log.Entry{
-				{
-					Data: log.Fields{
-						"foo": "123",
-					},
-				},
-				{
-					Data: log.Fields{
-						"bar": "456",
-					},
-				},
-			},
+	}
 
-			resp: &http.Response{
-				StatusCode: http.StatusOK,
-				Header: http.Header{
-					"Content-Type": []string{"application/x-ndjson"},
-				},
-				Body: ioutil.NopCloser(strings.NewReader(strings.Join([]string{
-					`{"foo":"123","level":"panic","msg":"","time":"0001-01-01T00:00:00Z"}`, "\n",
-					`{"bar":"456","level":"panic","msg":"","time":"0001-01-01T00:00:00Z"}`, "\n",
-				}, ""))),
-			},
-		},
+	id, err := uuid.FromString("026a1a9d-4744-4812-b4c7-0b83feda7244")
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	for i, tc := range testCases {
-		ls := LogStream{
-			OnTap: make(chan struct{}),
-		}
 		var h testHandler
 		handler := &Handler{
-			Secret:    tc.secret,
-			LogStream: &ls,
-			Next:      &h,
+			Store: &cache.Store{
+				Resources: map[cache.ResourceKey]*cache.Resource{
+					{Host: "www.example.com", Path: "/foo"}: {
+						ResourceKey: cache.ResourceKey{
+							Host: "www.example.com",
+							Path: "/foo",
+						},
+						Representations: map[cache.RepresentationKey]*cache.Representation{
+							{Method: http.MethodGet}: {
+								ResourceKey: cache.ResourceKey{
+									Host: "www.example.com",
+									Path: "/foo",
+								},
+								ID: id,
+							},
+						},
+					},
+				},
+			},
+			Secret: tc.secret,
+			Next:   &h,
 		}
-
-		c, cancel := context.WithCancel(tc.req.Context())
-		tc.req = tc.req.WithContext(c)
-		go func() {
-			<-ls.OnTap
-			for _, e := range tc.logs {
-				ls.Fire(e)
-			}
-			cancel()
-		}()
 
 		var resp cache.Representation
 		handler.ServeHTTP(&resp, tc.req)
@@ -164,59 +243,7 @@ func TestHandler_ServeHTTP(t *testing.T) {
 		}
 
 		if string(b) != string(resp.Body) {
-			t.Errorf("(%d) [Body] expected: %s, got: %s", i, string(b), string(resp.Body))
-		}
-	}
-}
-
-func TestLogStream_Levels(t *testing.T) {
-	tc := []log.Level{
-		log.PanicLevel,
-		log.FatalLevel,
-		log.ErrorLevel,
-		log.WarnLevel,
-		log.InfoLevel,
-	}
-
-	var ls LogStream
-	for i, l := range ls.Levels() {
-		if tc[i] != l {
-			t.Errorf("(%d) expected: %s, got %s", i, tc[i], l)
-		}
-	}
-}
-
-func TestLogStream_Fire(t *testing.T) {
-	testCases := []struct {
-		e log.Entry
-
-		b   []byte
-		err error
-	}{
-		{
-			e: log.Entry{},
-
-			b: []byte(strings.Join([]string{
-				`{"level":"panic","msg":"","time":"0001-01-01T00:00:00Z"}`, "\n",
-			}, "")),
-		},
-	}
-
-	var ls LogStream
-
-	for i, tc := range testCases {
-		ch := make(chan []byte, 1)
-		ls.Tap(ch)
-		err := ls.Fire(&tc.e)
-
-		if tc.err != err {
-			t.Errorf("(%d) expected: %v, got: %v", i, tc.err, err)
-		}
-
-		b := <-ch
-
-		if string(tc.b) != string(b) {
-			t.Errorf("(%d) expected: %s, got: %s", i, string(tc.b), string(b))
+			t.Errorf("(%d) [Body] expected: %v, got: %v", i, string(b), string(resp.Body))
 		}
 	}
 }

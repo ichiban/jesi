@@ -56,8 +56,6 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	log.AddHook(&proxy.LogStream)
-
 	go backends.Run(nil)
 
 	log.WithFields(log.Fields{
@@ -82,7 +80,6 @@ type ReverseProxy struct {
 	Backends *balance.BackendPool
 	Store    *cache.Store
 	Secret   string
-	control.LogStream
 }
 
 // Run runs the reverse proxy.
@@ -108,17 +105,16 @@ func (p *ReverseProxy) Run() {
 		Type: "internal",
 		Next: handler,
 	}
+	handler = &control.Handler{
+		Store:  p.Store,
+		Secret: p.Secret,
+		Next:   handler,
+	}
 	handler = &embed.Handler{
 		Next: handler,
 	}
 	handler = &conditional.Handler{
 		Next: handler,
-	}
-	handler = &control.Handler{
-		LogStream: &p.LogStream,
-		Store:     p.Store,
-		Secret:    p.Secret,
-		Next:      handler,
 	}
 	handler = &transaction.Handler{
 		Type: "down",
@@ -126,7 +122,7 @@ func (p *ReverseProxy) Run() {
 	}
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", p.Port),
-		Handler: handler,
+		Handler: normalizeURL(handler),
 	}
 
 	if err := server.ListenAndServe(); err != nil {
@@ -134,4 +130,16 @@ func (p *ReverseProxy) Run() {
 			"error": err,
 		}).Fatal("The server failed")
 	}
+}
+
+func normalizeURL(h http.Handler) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil {
+			r.URL.Scheme = "http"
+		} else {
+			r.URL.Scheme = "https"
+		}
+		r.URL.Host = r.Host
+		h.ServeHTTP(w, r)
+	})
 }

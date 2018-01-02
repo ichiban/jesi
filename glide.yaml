@@ -3,4 +3,3 @@ import:
 - package: github.com/sirupsen/logrus
 - package: github.com/satori/go.uuid
 - package: github.com/go-chi/chi
-  version: ^3.3.2

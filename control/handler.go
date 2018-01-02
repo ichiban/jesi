@@ -144,7 +144,11 @@ func (h *Handler) handlePurge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+		}).Error("failed to write purge response")
+	}
 }
 
 func (h *Handler) handleResources(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +178,11 @@ func (h *Handler) handleResources(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/hal+json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+		}).Error("failed to write resources response")
+	}
 }
 
 type resourceCollection struct {
@@ -230,12 +238,14 @@ func (h *Handler) handleResource(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/hal+json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+		}).Error("failed to write resource response")
+	}
 }
 
 func (h *Handler) handleRepresentation(w http.ResponseWriter, r *http.Request) {
-	h.Store.Init()
-
 	id, err := uuid.FromString(chi.URLParam(r, "id"))
 	if err != nil {
 		w.WriteHeader(http.StatusUnprocessableEntity)
@@ -273,7 +283,11 @@ func (h *Handler) handleRepresentation(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/hal+json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(b)
+	if _, err := w.Write(b); err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+		}).Error("failed to write representation response")
+	}
 }
 
 type resource struct {

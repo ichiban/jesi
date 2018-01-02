@@ -27,7 +27,7 @@ type Store struct {
 
 // Set inserts/updates a new pair of request/response to the cache.
 func (s *Store) Set(req *http.Request, rep *Representation) {
-	s.Init()
+	s.init()
 
 	s.Lock()
 	defer s.Unlock()
@@ -103,7 +103,7 @@ func (s *Store) evict() {
 
 // Get retrieves a cached response.
 func (s *Store) Get(req *http.Request) *Representation {
-	s.Init()
+	s.init()
 
 	s.RLock()
 	defer s.RUnlock()
@@ -133,7 +133,7 @@ func (s *Store) Get(req *http.Request) *Representation {
 
 // Purge removes any representations associated to the request.
 func (s *Store) Purge(req *http.Request) *Resource {
-	s.Init()
+	s.init()
 
 	s.Lock()
 	defer s.Unlock()
@@ -160,7 +160,7 @@ func (s *Store) Purge(req *http.Request) *Resource {
 	return res
 }
 
-func (s *Store) Init() {
+func (s *Store) init() {
 	s.Lock()
 	defer s.Unlock()
 

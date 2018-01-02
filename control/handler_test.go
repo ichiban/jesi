@@ -206,6 +206,15 @@ func TestHandler_ServeHTTP(t *testing.T) {
 						},
 					},
 				},
+				Representations: map[uuid.UUID]*cache.Representation{
+					id: {
+						ResourceKey: cache.ResourceKey{
+							Host: "www.example.com",
+							Path: "/foo",
+						},
+						ID: id,
+					},
+				},
 			},
 			Secret: tc.secret,
 			Next:   &h,

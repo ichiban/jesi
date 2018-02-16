@@ -243,7 +243,7 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // Requests with Authorization header are not cacheable without an explicit cacheable reponse.
+		{ // Requests with Authorization header are not cacheable without an explicit cacheable response.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,
@@ -260,7 +260,7 @@ func TestCacheable(t *testing.T) {
 			},
 			result: false,
 		},
-		{ // Requests with Authorization header are cacheable with an explicit cacheable reponse.
+		{ // Requests with Authorization header are cacheable with an explicit cacheable response.
 			req: &http.Request{
 				Method: http.MethodGet,
 				URL:    url,

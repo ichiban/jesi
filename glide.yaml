@@ -2,4 +2,3 @@ package: github.com/ichiban/jesi
 import:
 - package: github.com/sirupsen/logrus
 - package: github.com/satori/go.uuid
-- package: github.com/go-chi/chi

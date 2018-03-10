@@ -28,8 +28,9 @@ var _ io.WriterTo = (*Representation)(nil)
 
 // NewRepresentation creates a new representation from a handler and request.
 func NewRepresentation(h http.Handler, r *http.Request) *Representation {
+	id, _ := uuid.NewV4()
 	rep := Representation{
-		ID:        uuid.NewV4(),
+		ID:        id,
 		HeaderMap: http.Header{},
 	}
 	rep.RequestTime = time.Now()

@@ -7,12 +7,7 @@ import (
 	"time"
 
 	"github.com/satori/go.uuid"
-	log "github.com/sirupsen/logrus"
 )
-
-func init() {
-	log.SetLevel(log.WarnLevel)
-}
 
 func TestStore_Get(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
@@ -277,7 +272,13 @@ func TestStore_Set(t *testing.T) {
 						ResourceKey: ResourceKey{Host: "www.example.com", Path: "/foo"},
 						Representations: map[RepresentationKey]*Representation{
 							{Method: http.MethodGet, Key: ""}: {
-								ID:                uuid.NewV4(),
+								ID: func() uuid.UUID {
+									id, err := uuid.NewV4()
+									if err != nil {
+										panic(err)
+									}
+									return id
+								}(),
 								ResourceKey:       ResourceKey{Host: "www.example.com", Path: "/foo"},
 								RepresentationKey: RepresentationKey{Method: http.MethodGet, Key: ""},
 								Body:              []byte(`{"foo":"ok"}`),
@@ -348,8 +349,8 @@ func TestStore_Set(t *testing.T) {
 }
 
 func TestStore_Purge(t *testing.T) {
-	id1 := uuid.NewV4()
-	id2 := uuid.NewV4()
+	id1, _ := uuid.NewV4()
+	id2, _ := uuid.NewV4()
 
 	testCases := []struct {
 		before *Store

@@ -1,14 +1,17 @@
-hash: e417fe77aabef8570b016363e52feea496ae96cbcd034c04daee182e29a86c9c
-updated: 2017-12-23T19:53:03.363631+09:00
+hash: aa17a221f96effff92c79df3a90d9c9cf9058f43446f84e9f96f00dce982076d
+updated: 2018-03-10T14:55:15.716872+09:00
 imports:
-- name: github.com/go-chi/chi
-  version: e83ac2304db3c50cf03d96a2fcd39009d458bc35
 - name: github.com/satori/go.uuid
-  version: 5bf94b69c6b68ee1b541973bb8e1144db23a194b
+  version: 36e9d2ebbde5e3f13ab2e25625fd453271d6522e
 - name: github.com/sirupsen/logrus
-  version: 51dc0fc64317a2861273909081f9c315786533eb
+  version: 8c0189d9f6bbf301e5d055d34268156b317016af
+- name: golang.org/x/crypto
+  version: 650f4a345ab4e5b245a3034b110ebc7299e68186
+  subpackages:
+  - ssh/terminal
 - name: golang.org/x/sys
-  version: 4cd6d1a821c7175768725b55ca82f14683a29ea4
+  version: 37707fdb30a5b38865cfb95e5aab41707daec7fd
   subpackages:
   - unix
+  - windows
 testImports: []

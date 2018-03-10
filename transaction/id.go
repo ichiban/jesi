@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/satori/go.uuid"
+	log "github.com/sirupsen/logrus"
 )
 
 // Key is an identifier of a context value associated with requests.
@@ -16,7 +17,14 @@ const (
 )
 
 var genID = func() string {
-	return uuid.NewV4().String()
+	id, err := uuid.NewV4()
+	if err != nil {
+		log.WithFields(log.Fields{
+			"error": err,
+		}).Error("failed to generate transaction ID")
+		return ""
+	}
+	return id.String()
 }
 
 // WithID returns a request with unique ID based on a given request.

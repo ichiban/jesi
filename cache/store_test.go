@@ -6,12 +6,8 @@ import (
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/satori/go.uuid"
 )
-
-func init() {
-	log.SetLevel(log.WarnLevel)
-}
 
 func TestStore_Get(t *testing.T) {
 	url, err := url.Parse("http://www.example.com/test")
@@ -38,14 +34,11 @@ func TestStore_Get(t *testing.T) {
 			store: &Store{
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: ""}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: ""}: {
+								Body: []byte(`{"foo":"bar"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -64,14 +57,11 @@ func TestStore_Get(t *testing.T) {
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {
+								Body: []byte(`{"foo":"bar"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}}: {
-						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -94,14 +84,11 @@ func TestStore_Get(t *testing.T) {
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {
+								Body: []byte(`{"foo":"bar"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}}: {
-						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -120,14 +107,11 @@ func TestStore_Get(t *testing.T) {
 			store: &Store{
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: ""}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: ""}: {
+								Body: []byte(`{"foo":"bar"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -201,14 +185,11 @@ func TestStore_Set(t *testing.T) {
 				InUse: 13,
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							RepresentationKey{Method: http.MethodGet, Key: ""}: {},
+						Representations: map[RepresentationKey]*Representation{
+							RepresentationKey{Method: http.MethodGet, Key: ""}: {
+								Body: []byte(`{"foo":"bar"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -218,14 +199,11 @@ func TestStore_Set(t *testing.T) {
 				InUse: 13,
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: ""}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: ""}: {
+								Body: []byte(`{"test":"ok"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(`{"test":"ok"}`),
 					},
 				},
 			},
@@ -241,14 +219,11 @@ func TestStore_Set(t *testing.T) {
 				InUse: 0,
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: ""}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: ""}: {
+								Body: []byte(``),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(``),
 					},
 				},
 			},
@@ -275,16 +250,13 @@ func TestStore_Set(t *testing.T) {
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
 						Fields: []string{"Accept", "Accept-Language"},
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {},
-						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}}: {
-						Body: []byte{},
-						HeaderMap: http.Header{
-							"Vary": []string{"Accept", "Accept-Language"},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: "Accept=application%2Fjson&Accept-Language=ja-JP"}: {
+								Body: []byte{},
+								HeaderMap: http.Header{
+									"Vary": []string{"Accept", "Accept-Language"},
+								},
+							},
 						},
 					},
 				},
@@ -297,15 +269,22 @@ func TestStore_Set(t *testing.T) {
 				Sample: 2,
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/foo"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: ""}: {},
+						ResourceKey: ResourceKey{Host: "www.example.com", Path: "/foo"},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: ""}: {
+								ID: func() uuid.UUID {
+									id, err := uuid.NewV4()
+									if err != nil {
+										panic(err)
+									}
+									return id
+								}(),
+								ResourceKey:       ResourceKey{Host: "www.example.com", Path: "/foo"},
+								RepresentationKey: RepresentationKey{Method: http.MethodGet, Key: ""},
+								Body:              []byte(`{"foo":"ok"}`),
+								LastUsedTime:      time.Now().Add(-10 * time.Minute),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/foo"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body:         []byte(`{"foo":"ok"}`),
-						LastUsedTime: time.Now().Add(-10 * time.Minute),
 					},
 				},
 			},
@@ -321,14 +300,11 @@ func TestStore_Set(t *testing.T) {
 				InUse: 13,
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
-							{Method: http.MethodGet, Key: ""}: {},
+						Representations: map[RepresentationKey]*Representation{
+							{Method: http.MethodGet, Key: ""}: {
+								Body: []byte(`{"test":"ok"}`),
+							},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(`{"test":"ok"}`),
 					},
 				},
 			},
@@ -373,6 +349,9 @@ func TestStore_Set(t *testing.T) {
 }
 
 func TestStore_Purge(t *testing.T) {
+	id1, _ := uuid.NewV4()
+	id2, _ := uuid.NewV4()
+
 	testCases := []struct {
 		before *Store
 		req    *http.Request
@@ -395,21 +374,21 @@ func TestStore_Purge(t *testing.T) {
 			before: &Store{
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/test"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
+						Representations: map[RepresentationKey]*Representation{
 							{Method: http.MethodGet, Key: ""}: {},
 						},
 					},
 					{Host: "www.example.com", Path: "/foo"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
+						Representations: map[RepresentationKey]*Representation{
 							{Method: http.MethodGet, Key: ""}: {},
 						},
 					},
 				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+				Representations: map[uuid.UUID]*Representation{
+					id1: {
 						Body: []byte(`{"test":"ok"}`),
 					},
-					{ResourceKey{Host: "www.example.com", Path: "/foo"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
+					id2: {
 						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
@@ -425,14 +404,9 @@ func TestStore_Purge(t *testing.T) {
 			after: &Store{
 				Resources: map[ResourceKey]*Resource{
 					{Host: "www.example.com", Path: "/foo"}: {
-						RepresentationKeys: map[RepresentationKey]struct{}{
+						Representations: map[RepresentationKey]*Representation{
 							{Method: http.MethodGet, Key: ""}: {},
 						},
-					},
-				},
-				Representations: map[Key]*Representation{
-					{ResourceKey{Host: "www.example.com", Path: "/foo"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-						Body: []byte(`{"foo":"bar"}`),
 					},
 				},
 			},
@@ -477,14 +451,9 @@ func BenchmarkStore_Get(b *testing.B) {
 	store := Store{
 		Resources: map[ResourceKey]*Resource{
 			{Host: "www.example.com", Path: "/test"}: {
-				RepresentationKeys: map[RepresentationKey]struct{}{
-					{Method: http.MethodGet, Key: ""}: {},
-				},
-			},
-		},
-		Representations: map[Key]*Representation{
-			{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-				Body: []byte(`{
+				Representations: map[RepresentationKey]*Representation{
+					{Method: http.MethodGet, Key: ""}: {
+						Body: []byte(`{
   "_links": {
     "self": {"href": "/movies/1"},
     "roles": [{"href": "/roles/1"}, {"href": "/roles/2"}]
@@ -492,6 +461,8 @@ func BenchmarkStore_Get(b *testing.B) {
   "title": "Pulp Fiction",
   "year": 1994
 }`),
+					},
+				},
 			},
 		},
 	}

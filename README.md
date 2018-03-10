@@ -34,7 +34,6 @@ Every representation including but not limited to HAL+JSON documents is cached a
 Combined with embedding, the resulting HAL+JSON representation is constructed from cached representations and representations newly fetched from the upstream server so that it can maximize cache effectiveness.
 
 When Jesi cache reaches the memory limitation specified by `-max` command line option, it evicts some cached representations with LRU algorithm.
-Also, Jesi supports a de facto standard HTTP method `PURGE` to delete cached representations of a resource.
 
 ## Example
 

@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 - Load balancing
 - Transaction logging
-- Control layer protected by bearer token
-- Log stream
-- PURGE method to delete cached representations
 - Embedding with `With` header field
 
 ### Changed

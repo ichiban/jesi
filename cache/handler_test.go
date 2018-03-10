@@ -85,20 +85,17 @@ func TestHandler_ServeHTTP(t *testing.T) {
 				Store: &Store{
 					Resources: map[ResourceKey]*Resource{
 						{Host: "www.example.com", Path: "/test"}: {
-							RepresentationKeys: map[RepresentationKey]struct{}{
-								{Method: http.MethodGet, Key: ""}: {},
+							Representations: map[RepresentationKey]*Representation{
+								{Method: http.MethodGet, Key: ""}: {
+									StatusCode: http.StatusOK,
+									HeaderMap: http.Header{
+										"Cache-Control": []string{"s-maxage=600"},
+									},
+									Body:         []byte(`{"foo":"bar"}`),
+									RequestTime:  time.Now(),
+									ResponseTime: time.Now(),
+								},
 							},
-						},
-					},
-					Representations: map[Key]*Representation{
-						{ResourceKey{Host: "www.example.com", Path: "/test"}, RepresentationKey{Method: http.MethodGet, Key: ""}}: {
-							StatusCode: http.StatusOK,
-							HeaderMap: http.Header{
-								"Cache-Control": []string{"s-maxage=600"},
-							},
-							Body:         []byte(`{"foo":"bar"}`),
-							RequestTime:  time.Now(),
-							ResponseTime: time.Now(),
 						},
 					},
 				},

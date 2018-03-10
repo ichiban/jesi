@@ -70,7 +70,12 @@ func (n *Node) Set(s string) error {
 
 func (n *Node) String() string {
 	if n.ID == "" && n.Addr == nil {
-		n.ID = "_" + uuid.NewV4().String()
+		id, err := uuid.NewV4()
+		if err == nil {
+			n.ID = "_" + id.String()
+		} else {
+			n.ID = "unknown"
+		}
 	}
 
 	var s string

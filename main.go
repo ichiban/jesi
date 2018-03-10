@@ -11,7 +11,6 @@ import (
 	"github.com/ichiban/jesi/balance"
 	"github.com/ichiban/jesi/cache"
 	"github.com/ichiban/jesi/conditional"
-	"github.com/ichiban/jesi/control"
 	"github.com/ichiban/jesi/embed"
 	"github.com/ichiban/jesi/forward"
 	"github.com/ichiban/jesi/transaction"
@@ -26,7 +25,6 @@ func main() {
 	var backends balance.BackendPool
 	var store cache.Store
 	var verbose bool
-	var secret string
 
 	flag.StringVar(&profile, "profile", "", "run debug profiler")
 	flag.IntVar(&proxy.Port, "port", 8080, "port number")
@@ -35,7 +33,6 @@ func main() {
 	flag.Uint64Var(&store.Max, "max", 64*1024*1024, "max cache size in bytes")
 	flag.UintVar(&store.Sample, "sample", 3, "sample size for cache eviction")
 	flag.BoolVar(&verbose, "verbose", false, "log extra information")
-	flag.StringVar(&secret, "secret", "", "bearer token")
 	flag.Parse()
 
 	if profile != "" {
@@ -56,8 +53,6 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	log.AddHook(&proxy.LogStream)
-
 	go backends.Run(nil)
 
 	log.WithFields(log.Fields{
@@ -71,7 +66,6 @@ func main() {
 	proxy.Node = &node
 	proxy.Backends = &backends
 	proxy.Store = &store
-	proxy.Secret = secret
 	proxy.Run()
 }
 
@@ -81,8 +75,6 @@ type ReverseProxy struct {
 	Port     int
 	Backends *balance.BackendPool
 	Store    *cache.Store
-	Secret   string
-	control.LogStream
 }
 
 // Run runs the reverse proxy.
@@ -114,19 +106,13 @@ func (p *ReverseProxy) Run() {
 	handler = &conditional.Handler{
 		Next: handler,
 	}
-	handler = &control.Handler{
-		LogStream: &p.LogStream,
-		Store:     p.Store,
-		Secret:    p.Secret,
-		Next:      handler,
-	}
 	handler = &transaction.Handler{
 		Type: "down",
 		Next: handler,
 	}
 	server := http.Server{
 		Addr:    fmt.Sprintf(":%d", p.Port),
-		Handler: handler,
+		Handler: normalizeURL(handler),
 	}
 
 	if err := server.ListenAndServe(); err != nil {
@@ -134,4 +120,16 @@ func (p *ReverseProxy) Run() {
 			"error": err,
 		}).Fatal("The server failed")
 	}
+}
+
+func normalizeURL(h http.Handler) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil {
+			r.URL.Scheme = "http"
+		} else {
+			r.URL.Scheme = "https"
+		}
+		r.URL.Host = r.Host
+		h.ServeHTTP(w, r)
+	})
 }

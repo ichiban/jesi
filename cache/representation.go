@@ -12,6 +12,8 @@ import (
 // Representation is a buffered response.
 type Representation struct {
 	sync.RWMutex
+	ResourceKey
+	RepresentationKey
 	ID           uuid.UUID
 	StatusCode   int
 	HeaderMap    http.Header
@@ -26,8 +28,11 @@ var _ io.WriterTo = (*Representation)(nil)
 
 // NewRepresentation creates a new representation from a handler and request.
 func NewRepresentation(h http.Handler, r *http.Request) *Representation {
-	var rep Representation
-	rep.ID = uuid.NewV4()
+	id, _ := uuid.NewV4()
+	rep := Representation{
+		ID:        id,
+		HeaderMap: http.Header{},
+	}
 	rep.RequestTime = time.Now()
 	h.ServeHTTP(&rep, r)
 	rep.ResponseTime = time.Now()

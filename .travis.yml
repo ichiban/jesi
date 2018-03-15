@@ -8,7 +8,7 @@ install:
   - go get github.com/mitchellh/gox
   - go get -u gopkg.in/alecthomas/gometalinter.v1
   - gometalinter.v1 --install
-  - go install
+  - cd cmd/jesi && go install
 script:
   - gometalinter.v1 --fast --deadline=1m --exclude=_test $(glide novendor)
   - go test -v $(glide novendor)

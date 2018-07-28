@@ -1,6 +1,8 @@
-hash: aa17a221f96effff92c79df3a90d9c9cf9058f43446f84e9f96f00dce982076d
-updated: 2018-03-10T14:55:15.716872+09:00
+hash: cdeb4981dec833b382849f8f5b29b6bdd9d6353f01d6eada3587a02341369102
+updated: 2018-07-28T15:39:49.751219+09:00
 imports:
+- name: github.com/google/uuid
+  version: 064e2069ce9c359c118179501254f67d7d37ba24
 - name: github.com/satori/go.uuid
   version: 36e9d2ebbde5e3f13ab2e25625fd453271d6522e
 - name: github.com/sirupsen/logrus

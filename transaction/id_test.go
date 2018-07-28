@@ -4,13 +4,18 @@ import (
 	"context"
 	"net/http"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestWithID(t *testing.T) {
-	id := "6a652ecd-8285-4f6b-94d6-686bea2d6d7d"
+	id, err := uuid.Parse("6a652ecd-8285-4f6b-94d6-686bea2d6d7d")
+	if err != nil {
+		t.Fatalf("uuid.Parse() failed: %v", err)
+	}
 
 	oldGenID := genID
-	genID = func() string {
+	genID = func() uuid.UUID {
 		return id
 	}
 	defer func() {
@@ -21,7 +26,7 @@ func TestWithID(t *testing.T) {
 
 	testCases := []struct {
 		req *http.Request
-		id  string
+		id  uuid.UUID
 	}{
 		{
 			req: req,
@@ -35,7 +40,7 @@ func TestWithID(t *testing.T) {
 
 	for i, tc := range testCases {
 		r := WithID(tc.req)
-		id := r.Context().Value(IDKey).(string)
+		id := r.Context().Value(IDKey).(uuid.UUID)
 		if tc.id != id {
 			t.Errorf("(%d) expected: %s, got: %s", i, tc.id, id)
 		}
@@ -44,25 +49,36 @@ func TestWithID(t *testing.T) {
 
 func TestID(t *testing.T) {
 	r := &http.Request{}
-	id := "6a652ecd-8285-4f6b-94d6-686bea2d6d7d"
+	id, err := uuid.Parse("6a652ecd-8285-4f6b-94d6-686bea2d6d7d")
+	if err != nil {
+		t.Fatalf("uuid.Parse() failed: %v", err)
+	}
 
 	testCases := []struct {
 		req *http.Request
-		id  string
+		id  *uuid.UUID
 	}{
 		{
 			req: r,
-			id:  "",
+			id:  nil,
 		},
 		{
 			req: r.WithContext(context.WithValue(nil, IDKey, id)),
-			id:  id,
+			id:  &id,
 		},
 	}
 
 	for i, tc := range testCases {
 		id := ID(tc.req)
-		if tc.id != id {
+		if tc.id == nil {
+			if id != nil {
+				t.Errorf("(%d) expected: nil, got: %s", i, id)
+			}
+			continue
+		} else if id == nil {
+			t.Errorf("(%d) expected: %s, got: nil", i, tc.id)
+		}
+		if *tc.id != *id {
 			t.Errorf("(%d) expected: %s, got: %s", i, tc.id, id)
 		}
 	}
